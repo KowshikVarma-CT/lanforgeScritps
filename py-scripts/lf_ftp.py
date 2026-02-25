@@ -74,26 +74,6 @@ Command Line Interface to run download scenario by Configuring Devices in Groups
 python3 lf_ftp.py --file_sizes 1MB --mgr 192.168.213.218 --traffic_duration 1m  --directions Download --clients_type Real  --bands 5G
  --upstream_port eth1 --file_name g219 --group_name grp1 --profile_name Open3 --expected_passfail_value 3 --wait_time 30
 
-EXAMPLE-14:
-Command Line Interface to run the Test along with IOT without device list
-python3 lf_ftp.py --ssid Netgear-5g --passwd sharedsecret --file_sizes 10MB --mgr 192.168.207.78 --traffic_duration 1m --security wpa2
- --directions Download --clients_type Real --ap_name Netgear --bands 5G --upstream_port eth1 --iot_test --iot_testname "IotTest"
-
-EXAMPLE-15:
-Command Line Interface to run the Test along with IOT with device list
-python3 lf_ftp.py --ssid Netgear-5g --passwd sharedsecret --file_sizes 10MB --mgr 192.168.207.78 --traffic_duration 1m --security wpa2
- --directions Download --clients_type Real --ap_name Netgear --bands 5G --upstream_port eth1 --iot_test --iot_testname "IotTest" --iot_device_list "switch.smart_plug_1_socket_1"
-
-EXAMPLE-16:
-Command Line Interface to run download scenario for Real clients with only coordinates
-python3 lf_ftp.py --ssid Netgear-5g --passwd sharedsecret --file_sizes 10MB --mgr 192.168.207.78 --traffic_duration 1m
---security wpa2 --directions Download --clients_type Real --ap_name Netgear --bands 5G --upstream_port eth1 --robot_test --robot_ip 192.168.204.101 --coordinate 3,4
-
-EXAMPLE-17:
-Command Line Interface to run download scenario for Real clients with coordinates and rotations
-python3 lf_ftp.py --ssid Netgear-5g --passwd sharedsecret --file_sizes 10MB --mgr 192.168.207.78 --traffic_duration 1m
---security wpa2 --directions Download --clients_type Real --ap_name Netgear --bands 5G --upstream_port eth1 --robot_test --robot_ip 192.168.204.101 --coordinate 3,4 --rotation 30,45
-
 SCRIPT_CLASSIFICATION : Test
 
 SCRIPT_CATEGORIES:   Performance,  Functional,  Report Generation
@@ -138,9 +118,6 @@ from typing import List, Optional
 import asyncio
 import csv
 import traceback
-import threading
-from collections import OrderedDict
-from lf_base_robo import RobotClass
 
 if sys.version_info[0] != 3:
     print("This script requires Python 3")
@@ -161,11 +138,6 @@ lf_graph = importlib.import_module("py-scripts.lf_graph")
 lf_kpi_csv = importlib.import_module("py-scripts.lf_kpi_csv")
 logger = logging.getLogger(__name__)
 lf_logger_config = importlib.import_module("py-scripts.lf_logger_config")
-
-iot_scripts_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../local/interop-webGUI/IoT/scripts/"))
-if os.path.exists(iot_scripts_path):
-    sys.path.insert(0, iot_scripts_path)
-    from test_automation import Automation  # noqa: E402
 
 
 class FtpTest(LFCliBase):
@@ -199,11 +171,7 @@ class FtpTest(LFCliBase):
                  total_floors=0,
                  config=False,
                  csv_name=None,
-                 robot_test=False,
-                 robot_ip=None,
-                 coordinate=None,
-                 rotation=None,
-                 ):
+                 timeBreak=None):
         super().__init__(lfclient_host, lfclient_port, _debug=_debug_on, _exit_on_fail=_exit_on_fail)
 
         if not device_list:
@@ -308,19 +276,7 @@ class FtpTest(LFCliBase):
         self.api_url = 'http://{}:{}'.format(self.host, self.port)
         self.get_live_view = get_live_view
         self.total_floors = total_floors
-        # Robot related variables
-        self.robot_test = robot_test
-        self.robot_ip = robot_ip
-        self.coordinate = coordinate
-        self.rotation = rotation
-        self.rotation_enabled = False
-        if self.robot_test:
-            self.coordinate_list = coordinate.split(',')
-            self.rotation_list = rotation.split(',')
-        self.current_coordinate = ""
-        self.current_angle = ""
-        self.robot_data = {}
-        self.robot_obj = {}
+        self.timeBreak = timeBreak
 
         logger.info("Test is Initialized")
 
@@ -843,55 +799,10 @@ class FtpTest(LFCliBase):
         self.station_profile.admin_down()
         # To update status of devices and remaining_time in ftp_datavalues.csv file to stopped and 0 respectively.
         if self.clients_type == 'Real':
-            if not self.robot_test:
-                self.data["status"] = ["STOPPED"] * len(self.mac_id_list)
+            self.data["status"] = ["STOPPED"] * len(self.mac_id_list)
             self.data["remaining_time"] = ["0"] * len(self.mac_id_list)
             df1 = pd.DataFrame(self.data)
             df1.to_csv("ftp_datavalues.csv", index=False)
-            if self.robot_test:
-                # Storing data in robot_data dictionary for each coordinate and angle
-                if self.rotation_enabled:
-                    self.robot_data.setdefault(self.current_coordinate, {})[self.current_angle] = {
-                        "mac_id_list": self.mac_id_list,
-                        "channel_list": self.channel_list,
-                        "ssid_list": self.ssid_list,
-                        "mode_list": self.mode_list,
-                        "url_data": self.url_data,
-                        "uc_avg": self.uc_avg,
-                        "bytes_rd": self.bytes_rd,
-                        "rx_rate": self.rx_rate,
-                        "total_err": self.total_err,
-                        "uc_min": self.uc_min,
-                        "uc_max": self.uc_max,
-                    }
-                else:
-                    self.robot_data[self.current_coordinate] = {
-                        "mac_id_list": self.mac_id_list,
-                        "channel_list": self.channel_list,
-                        "ssid_list": self.ssid_list,
-                        "mode_list": self.mode_list,
-                        "url_data": self.url_data,
-                        "uc_avg": self.uc_avg,
-                        "bytes_rd": self.bytes_rd,
-                        "rx_rate": self.rx_rate,
-                        "total_err": self.total_err,
-                        "uc_min": self.uc_min,
-                        "uc_max": self.uc_max
-                    }
-                if self.dowebgui:
-                    df1.to_csv(f"{self.result_dir}/{self.current_coordinate}_ftp_datavalues.csv", index=False)
-                else:
-                    df1.to_csv(f"{self.current_coordinate}_ftp_datavalues.csv", index=False)
-
-    def update_stop_status_robot(self):
-        # To update status of devices in csv file to stopped.
-        self.data["status"] = ["STOPPED"] * len(self.mac_id_list)
-        df1 = pd.DataFrame(self.data)
-        df1.to_csv("ftp_datavalues.csv", index=False)
-        if self.dowebgui:
-            df1.to_csv(f"{self.result_dir}/{self.current_coordinate}_ftp_datavalues.csv", index=False)
-        else:
-            df1.to_csv(f"{self.current_coordinate}_ftp_datavalues.csv", index=False)
 
     def postcleanup(self):
         self.cx_profile.cleanup()
@@ -1035,63 +946,28 @@ class FtpTest(LFCliBase):
 
     # FOR WEB-UI // function usd to fetch runtime values and fill the csv.
 
-    def monitor_for_runtime_csv(self):
+    def monitor_for_runtime_csv(self,band,direction,file_size,indv_device_csv_list):
 
         time_now = datetime.now()
         start_time = time_now.strftime("%d/%m %I:%M:%S %p")
         duration = self.traffic_duration
         endtime = time_now + timedelta(seconds=duration)
         end_time = endtime
-        endtime = endtime
-        current_time = datetime.now()
+        endtime = endtime.isoformat()[0:19]
+        current_time = datetime.now().isoformat()[0:19]
         self.data = {}
         self.data["url_data"] = []
         max_bytes_rd = []
         rx_rate_val = []
         individual_device_data = {}
         client_id_list = []
-        test_stopped_by_user = False
         for port in self.input_devices_list:
-            columns = ['TIMESTAMP', 'Bytes-rd', 'total urls', 'download_rate', 'rx_rate', 'tx_rate', 'RSSI']
+            columns = ['TIMESTAMP', 'Bytes-rd', 'total urls', 'download_rate', 'rx_rate', 'tx_rate', 'RSSI','Band', 'Direction', 'File Size']
             individual_device_data[port] = pd.DataFrame(columns=columns)
             r_id = port.split('.')
             client_id_list.append('.'.join(r_id[:2]))
-        monitor_charge_time = current_time
-        while (current_time < endtime):
-            # If robot test mode is enabled, periodically check if a battery pause is needed
-            if self.robot_test:
-                # Check if enough time has passed to trigger a battery check (300 sec)
-                if (datetime.now() - monitor_charge_time).total_seconds() >= 300:
-                    pause_start = datetime.now()
-                    # Wait for the robot to charge. Returns whether we paused and whether user aborted.
-                    pause, test_stopped_by_user = self.robot_obj.wait_for_battery(stop=self.stop)
-                    if test_stopped_by_user:
-                        break
-                    if pause:
-                        # After charging, return to the last coordinate
-                        reached, abort = self.robot_obj.move_to_coordinate(self.current_coordinate)
-                        # If user stopped the test during movement
-                        if abort:
-                            test_stopped_by_user = True
-                            break
-                        if not reached:
-                            break
-                        # Restore orientation if rotation is enabled
-                        if self.rotation_enabled:
-                            rotation_moni = self.robot_obj.rotate_angle(self.current_angle)
-                            if not rotation_moni:
-                                break
-                        # Resume test
-                        self.start()
-                        # Add pause duration to overall end time
-                        pause_end = datetime.now()
-                        charge_pause = pause_end - pause_start
-                        endtime += charge_pause
-                    # Reset battery-monitor timer
-                    monitor_charge_time = datetime.now()
 
-                    # IMPORTANT: update loop time after potential pause
-                    current_time = datetime.now()
+        while (current_time < endtime):
 
             # data in json format
             # data = self.json_get("layer4/list?fields=bytes-rd")
@@ -1116,13 +992,20 @@ class FtpTest(LFCliBase):
             rx_rate_val.append(list(self.rx_rate))
             for i, port in enumerate(self.input_devices_list):
                 try:
-                    row_data = [current_time, self.bytes_rd[i], self.url_data[i], self.rx_rate[i], self.port_rx_rate[i], self.tx_rate[i], self.rssi_list[i]]
+                    row_data = [current_time, self.bytes_rd[i], self.url_data[i], self.rx_rate[i], self.port_rx_rate[i], self.tx_rate[i], self.rssi_list[i],band,direction,file_size]
                     individual_device_data[port].loc[len(individual_device_data[port])] = row_data
+                    
+                    device_csv = f"ftp-{port.replace('.', '-')}.csv"
+                    pd.DataFrame([row_data], columns=individual_device_data[port].columns).to_csv(
+                        device_csv,
+                        mode='a',
+                        header=not os.path.exists(device_csv),
+                        index=False
+                    )
                 except Exception:
                     # Fail-safe: if any list index/key mismatch occurs while adding row_data,
                     # stop execution to avoid inconsistent results.
-                    tb_str = traceback.format_exc()  # capture traceback as string
-                    logger.error("An exception occurred:\n%s", tb_str)
+                    traceback.print_exc()
                     exit(1)
             # calculating average for rx_rate
             for j in range(len(rx_rate_val[0])):
@@ -1170,60 +1053,54 @@ class FtpTest(LFCliBase):
             total_hours = time_difference.total_seconds() / 3600
             remaining_minutes = (total_hours % 1) * 60
             self.data["start_time"] = [start_time] * len(self.cx_list)
-            if self.robot_test:
-                # To update end time at each interval
-                end_time = endtime
             self.data["end_time"] = [end_time.strftime("%d/%m %I:%M:%S %p")] * len(self.cx_list)
             self.data["remaining_time"] = [[str(int(total_hours)) + " hr and " + str(
                 int(remaining_minutes)) + " min" if int(total_hours) != 0 or int(
                 remaining_minutes) != 0 else '<1 min'][0]] * len(self.cx_list)
-            if self.robot_test and self.rotation_enabled:
-                self.data["current_angle"] = [self.current_angle] * len(self.cx_list)
             try:
                 df1 = pd.DataFrame(self.data)
             except Exception:
                 # Print the problematic data and error before exiting
                 logger.info("Failed to create DataFrame from self.data")
                 logger.info("self.data: %s", self.data)
-                tb_str = traceback.format_exc()  # capture traceback as string
-                logger.error("An exception occurred:\n%s", tb_str)
+                traceback.print_exc()
                 exit(1)
             if self.dowebgui:
                 df1.to_csv('{}/ftp_datavalues.csv'.format(self.result_dir), index=False)
-                if self.robot_test:
-                    # Save FTP data values for the current coordinate when in robot test
-                    df1.to_csv(f"{self.result_dir}/{self.current_coordinate}_ftp_datavalues.csv", index=False)
             if self.clients_type == 'Real':
-                df1.to_csv("ftp_datavalues.csv", index=False)
-                if self.robot_test:
-                    df1.to_csv(f"{self.current_coordinate}_ftp_datavalues.csv", index=False)
-            time.sleep(5)
+                df1.to_csv(
+                    'ftp_datavalues.csv',
+                    # mode='a',
+                    header=not os.path.exists('ftp_datavalues.csv'),
+                    index=False
+                )
+            time.sleep(self.timeBreak)
             if self.dowebgui == "True":
                 with open(self.result_dir + "/../../Running_instances/{}_{}_running.json".format(self.host,
                                                                                                  self.test_name),
                           'r') as file:
                     data = json.load(file)
                     if data["status"] != "Running":
-                        # User has requested to stop the test
-                        test_stopped_by_user = True
                         logging.info('Test is stopped by the user')
                         self.data["end_time"] = [datetime.now().strftime("%d/%m %I:%M:%S %p")] * len(self.cx_list)
                         break
 
-            current_time = datetime.now()
+            current_time = datetime.now().isoformat()[0:19]
         individual_device_csv_names = []
-        for port, df in individual_device_data.items():
-            df.to_csv(f"{endtime}-ftp-{port}.csv", index=False)
-            individual_device_csv_names.append(f'{endtime}-ftp-{port}')
-        self.individual_device_csv_names = individual_device_csv_names
+        for port in individual_device_data.keys():
+            safe_port = port.replace('.', '-')
+            csv_name = f"ftp-{safe_port}"
+            individual_device_csv_names.append(csv_name)
+        indv_device_csv_list.extend(individual_device_csv_names)
+        self.individual_device_csv_list = indv_device_csv_list
         try:
             all_l4_data = self.get_all_l4_data()
             df = pd.DataFrame(all_l4_data)
             df.to_csv("all_l4_data.csv", index=False)
         except Exception:
             logger.error("All l4 data not found")
-
-        return test_stopped_by_user
+            
+        # return test_stopped_by_user
 
     def get_layer4_data(self):
         """
@@ -1284,7 +1161,7 @@ class FtpTest(LFCliBase):
         dataset = []
         self.channel_list, self.mode_list, self.ssid_list, self.uc_avg, self.uc_max, self.url_data, self.uc_min, self.bytes_rd, self.rx_rate = [], [], [], [], [], [], [], [], []
         self.total_err = []
-        if self.clients_type == "Real":
+        if self.clients_type == "Real" or self.clients_type == "Virtual":
             self.get_port_data()
         # data in json format
         # data = self.json_get("layer4/list?fields=bytes-rd")
@@ -1307,7 +1184,7 @@ class FtpTest(LFCliBase):
         Retrieves signal strength, rx rate, link speed(tx-rate), mode, ssid data for the specified devices from port.
 
         """
-        station_names = self.input_devices_list
+        station_names = self.input_devices_list if self.clients_type == "Real" else self.station_list
         interfaces_dict = dict()
         try:
             port_data = self.local_realm.json_get('/ports/all/')['interfaces']
@@ -1461,6 +1338,148 @@ class FtpTest(LFCliBase):
                 df1.to_csv('{}/ftp_datavalues.csv'.format(self.result_dir), index=False)
             logger.info("No layer 4-7 endpoints")
             exit()
+    
+    def monitor_virtual(self, band, direction, file_size, indv_device_csv_list):
+        time_now = datetime.now()
+        start_time = time_now.strftime("%d/%m %I:%M:%S")
+        duration = self.traffic_duration
+        end_time = time_now + timedelta(seconds=duration)
+        current_time = datetime.now()
+        self.data = {}
+        self.data["url_data"] = []
+        max_bytes_rd = []
+        rx_rate_val = []
+        individual_device_data = {}
+        client_id_list = []
+        test_stopped_by_user = False
+        main_csv_file = 'ftp_datavalues.csv' #f"{band}-{direction}-{file_size}-ftp_datavalues.csv"
+        # Initialize per-device dataframe
+        for port in self.station_list:
+            columns = ['TIMESTAMP', 'Bytes-rd', 'total urls',
+                       'download_rate', 'rx_rate', 'tx_rate', 'RSSI','Band','Direction','File Size']
+            individual_device_data[port] = pd.DataFrame(columns=columns)
+            r_id = port.split('.')
+            client_id_list.append('.'.join(r_id[:2]))
+        while current_time < end_time:
+            self.get_device_details()
+            self.data["client"] = self.cx_list
+            self.data["MAC"] = self.mac_id_list
+            self.data["Channel"] = self.channel_list
+            self.data["SSID"] = self.ssid_list
+            self.data["Mode"] = self.mode_list
+            self.data['UC-MIN'] = self.uc_min
+            self.data['UC-AVG'] = self.uc_avg
+            self.data['UC-MAX'] = self.uc_max
+            self.data['client_id'] = client_id_list
+            self.data['total_err'] = self.total_err
+            rx_rate_val.append(list(self.rx_rate))
+            # INDIVIDUAL DEVICE LOGIC (your original logic preserved)
+            for i, port in enumerate(self.station_list):
+                try:
+                    row_data = [
+                        current_time,
+                        self.bytes_rd[i],
+                        self.url_data[i],
+                        self.rx_rate[i],
+                        self.port_rx_rate[i],
+                        self.tx_rate[i],
+                        self.rssi_list[i],
+                        band,
+                        direction,
+                        file_size
+                    ]
+                    # Append to in-memory dataframe (original logic)
+                    individual_device_data[port].loc[
+                        len(individual_device_data[port])
+                    ] = row_data
+                    # ALSO append real-time to CSV
+                    device_csv = f"ftp-{port.replace('.', '-')}.csv"
+                    pd.DataFrame([row_data], columns=individual_device_data[port].columns).to_csv(
+                        device_csv,
+                        mode='a',
+                        header=not os.path.exists(device_csv),
+                        index=False
+                    )
+                except Exception:
+                    tb_str = traceback.format_exc()
+                    logger.error("Exception in device logic:\n%s", tb_str)
+                    exit(1)
+            # RX averaging logic (unchanged)
+            for j in range(len(rx_rate_val[0])):
+                rx_rate_sum = 0
+                non_zero = 0
+                for i in range(len(rx_rate_val)):
+                    if rx_rate_val[i][j] != 0:
+                        rx_rate_sum += rx_rate_val[i][j]
+                        non_zero += 1
+                rx_rate_average = rx_rate_sum / non_zero if non_zero > 0 else 0
+                self.rx_rate[j] = round(rx_rate_average, 4)
+            self.rx_rate = [round(x / 1000000, 4) for x in self.rx_rate]
+            self.data['Rx Rate(1m)'] = self.rx_rate
+            # Max bytes logic
+            if len(max_bytes_rd) == 0:
+                max_bytes_rd = list(self.bytes_rd)
+            for i in range(len(max_bytes_rd)):
+                self.bytes_rd[i] = max(max_bytes_rd[i], self.bytes_rd[i])
+            max_bytes_rd = list(self.bytes_rd)
+            self.data['Bytes RD'] = self.bytes_rd
+            if self.url_data != []:
+                self.data["status"] = ["RUNNING"] * len(self.url_data)
+                self.data["url_data"] = self.url_data
+            else:
+                self.data["status"] = ["RUNNING"] * len(self.cx_list)
+                self.data["url_data"] = [0] * len(self.cx_list)
+            time_difference = abs(end_time - datetime.now())
+            total_hours = time_difference.total_seconds() / 3600
+            remaining_minutes = (total_hours % 1) * 60
+            self.data["start_time"] = [start_time] * len(self.cx_list)
+            self.data["end_time"] = [
+                end_time.strftime("%d/%m %I:%M:%S")
+            ] * len(self.cx_list)
+            self.data["remaining_time"] = [[
+                str(int(total_hours)) + " hr and " +
+                str(int(remaining_minutes)) + " min"
+                if int(total_hours) != 0 or int(remaining_minutes) != 0
+                else '<1 min'
+            ][0]] * len(self.cx_list)
+            try:
+                df1 = pd.DataFrame(self.data)
+            except Exception:
+                logger.info("Failed to create DataFrame from self.data")
+                logger.info("self.data: %s", self.data)
+                tb_str = traceback.format_exc()
+                logger.error("Exception:\n%s", tb_str)
+                exit(1)
+            # Real-time main CSV append
+            if self.clients_type == 'Virtual':
+                df1.to_csv(
+                    main_csv_file,
+                    # mode='a',
+                    header=True, #not os.path.exists(main_csv_file)
+                    index=False
+                )
+            # print(f"this is {self.timeBreak}")
+            # exit(1)
+            x = self.timeBreak if self.timeBreak else 5
+            time.sleep(x)
+            current_time = datetime.now()
+        # Final device CSV names list (original logic preserved)
+        individual_device_csv_names = []
+        for port in individual_device_data.keys():
+            safe_port = port.replace('.', '-')
+            csv_name = f"ftp-{safe_port}"
+            individual_device_csv_names.append(csv_name)
+        indv_device_csv_list.extend(individual_device_csv_names)
+        self.individual_device_csv_list = indv_device_csv_list
+        # Final L4 dump
+        try:
+            all_l4_data = self.get_all_l4_data()
+            df = pd.DataFrame(all_l4_data)
+            # print(df)
+            df.to_csv(f"all_l4_data.csv",index=False) #f"{band}-{direction}-{file_size}-all_l4_data.csv", index=False
+        except Exception:
+            logger.error("All l4 data not found")
+        return test_stopped_by_user
 
     def my_monitor_for_real_devices(self):
         self.channel_list, self.mode_list, self.ssid_list = [], [], []
@@ -1930,163 +1949,9 @@ class FtpTest(LFCliBase):
                 self.report.set_custom_html(f'<img src="file://{ftp_img_path}"></img>')
                 self.report.build_custom()
 
-    def build_single_graph(self, client_list, data, graph_name, title, x_label, color, direction):
-        """Helper: Build a horizontal bar graph and attach to report.
-        Parameters
-        client_list : list
-            List of client names to be displayed on the y-axis.
-        data : list
-            Numerical data values corresponding to each client in `client_list`.
-        graph_name : str
-            Filename for saving the generated graph image.
-        title : str
-            Title of the graph to be displayed at the top.
-        x_label : str
-            Label for the x-axis (typically representing the metric being measured).
-        color : str or tuple
-            Color specification for the bars (e.g., hex code, named color, or RGB tuple).
-        direction : str
-            Direction of the FTP operation, e.g., "Download" or "Upload".
-"""
-        x_fig_size = 18
-        y_fig_size = len(self.real_client_list1) * .5 + 4
-        graph = lf_bar_graph_horizontal(
-            _data_set=[data],
-            _xaxis_name=x_label,
-            _yaxis_name="Client names",
-            _yaxis_categories=client_list,
-            _yaxis_label=client_list,
-            _yaxis_step=1,
-            _yticks_font=8,
-            _yticks_rotation=None,
-            _graph_title=title,
-            _title_size=16,
-            _figsize=(x_fig_size, y_fig_size),
-            _legend_loc="best",
-            _legend_box=(1.0, 1.0),
-            _color_name=[color],
-            _show_bar_value=True,
-            _enable_csv=True,
-            _graph_image_name=graph_name,
-            _color_edge=['black'],
-            _color=[color],
-            _label=[direction]
-        )
-
-        graph_png = graph.build_bar_graph_horizontal()
-        logger.info(f"Graph generated: {graph_png}")
-
-        self.report.set_graph_image(graph_png)
-        self.report.move_graph_image()
-        self.report.set_csv_filename(graph_png)
-        self.report.move_csv_file()
-        self.report.build_graph()
-
-    def build_graphs_and_table(self, coord, rotation, robot_info, client_list):
-        """Build graphs (URL + Avg Time) and table for one coordinate/rotation.
-        Parameters
-        coord : str
-            Coordinate identifier for the test location .
-            Displayed as a section header in the report.
-        rotation : str or None
-            Rotation value associated with the coordinate. If provided and rotations are enabled,
-            it is included in the section header.
-        robot_info : dict
-            Dictionary containing per-client test data collected by the robot.
-        client_list : list
-            Ordered list of client names corresponding to the values in `robot_info`.
-        """
-        url_data_robo = robot_info['url_data']
-        uc_avg_robo = robot_info['uc_avg']
-        uc_min_robo = robot_info['uc_min']
-        uc_max_robo = robot_info['uc_max']
-        mode_list_robo = robot_info['mode_list']
-        ssid_list_robo = robot_info['ssid_list']
-        channel_list_robo = robot_info['channel_list']
-        mac_id_list_robo = robot_info['mac_id_list']
-        bytes_rd_robo = robot_info['bytes_rd']
-        rx_rate_robo = robot_info['rx_rate']
-        total_err_robo = robot_info['total_err']
-
-        rotation_suffix = f"_{rotation}" if rotation else ""
-        coord_label = f"<h2>Coordinate: {coord}</h2>"
-        if self.rotation_enabled:
-            coord_label = f"<h2>Coordinate: {coord}{', Rotation: ' + str(rotation) if rotation else ''}</h2>"
-        self.report.set_custom_html(coord_label)
-        self.report.build_custom()
-
-        # Graph 1: URL Count
-        self.report.set_obj_html(
-            _obj_title=f"No of times file {self.direction}",
-            _obj=(f"The below graph represents number of times a file {self.direction} for each client "
-                  f"(WiFi) traffic. X-axis shows 'No of times file {self.direction}' and Y-axis shows Client names.")
-        )
-        self.report.build_objective()
-        self.build_single_graph(
-            client_list=client_list,
-            data=url_data_robo,
-            graph_name=f"Total-url_ftp_{coord}{rotation_suffix}",
-            title=f"No of times file {self.direction} (Count)",
-            x_label=f"No of times file {self.direction}",
-            color="orange",
-            direction=self.direction
-        )
-
-        # Graph 2: Average Time
-        self.report.set_obj_html(
-            _obj_title=f"Average time taken to {self.direction} file",
-            _obj=(f"The below graph represents average time taken to {self.direction} for each client "
-                  f"(WiFi) traffic. X-axis shows 'Average time taken to {self.direction}' and Y-axis shows Client names.")
-        )
-        self.report.build_objective()
-        self.build_single_graph(
-            client_list=client_list,
-            data=uc_avg_robo,
-            graph_name=f"Avg-time_ftp_{coord}{rotation_suffix}",
-            title=f"Average time taken to {self.direction} file",
-            x_label=f"Average time taken to {self.direction} file in ms",
-            color="steelblue",
-            direction=self.direction
-        )
-
-        self.report.set_obj_html(
-            "File Download Time (sec)",
-            "The below table provides minimum, maximum and average time taken by clients to download a file (seconds)"
-        )
-        self.report.build_objective()
-
-        table_data = {
-            "Minimum": [str(round(min(uc_min_robo) / 1000, 1))],
-            "Maximum": [str(round(max(uc_max_robo) / 1000, 1))],
-            "Average": [str(round((sum(uc_avg_robo) / len(client_list)) / 1000, 1))]
-        }
-
-        df = pd.DataFrame(table_data)
-        self.report.set_table_dataframe(df)
-        self.report.build_table()
-
-        self.report.set_table_title("Overall Results")
-        self.report.build_table_title()
-
-        dataframe = {
-            " Clients": client_list,
-            " MAC ": mac_id_list_robo,
-            " Channel": channel_list_robo,
-            " SSID ": ssid_list_robo,
-            " Mode": mode_list_robo,
-            " No of times File downloaded ": url_data_robo,
-            " Time Taken to Download file (ms)": uc_avg_robo,
-            " Bytes-rd (Mega Bytes)": bytes_rd_robo,
-            " RX RATE (Mbps) ": rx_rate_robo,
-            "Failed Urls": total_err_robo
-        }
-        dataframe1 = pd.DataFrame(dataframe)
-        self.report.set_table_dataframe(dataframe1)
-        self.report.build_table()
-
     def generate_report(self, ftp_data, date, input_setup_info, test_rig, test_tag, dut_hw_version,
-                        dut_sw_version, dut_model_num, dut_serial_num, test_id, bands,
-                        csv_outfile, local_lf_report_dir, _results_dir_name='ftp_test', report_path='', config_devices="", iot_summary=None):
+                        dut_sw_version, dut_model_num, dut_serial_num, test_id, bands,directions, file_sizes,
+                        csv_outfile, local_lf_report_dir, _results_dir_name='ftp_test', report_path='', config_devices=""):
         no_of_stations = ""
         duration = ""
         x_fig_size = 18
@@ -2149,15 +2014,43 @@ class FtpTest(LFCliBase):
 
         # To move ftp_datavalues.csv in report folder
         report_path_date_time = self.report.get_path_date_time()
-        if self.clients_type == "Real":
-            shutil.move('ftp_datavalues.csv', report_path_date_time)
+        # print(f"---------------------------- this is generate report path ------> {report_path_date_time}")
+        if self.clients_type == "Virtual" or self.clients_type == "Real": #or self.clients_type == "Real"
+            for band in bands:
+                for direction in directions:
+                    for size in file_sizes:
+                        # try:
+                        #     shutil.move(f'{band}-{direction}-{size}-all_l4_data.csv', report_path_date_time)
+                        # except Exception as e:
+                        #     logger.error(f"failed to create all layer 4 csv of {band} {direction} {size}")
+                        # try:   
+                        #     shutil.move(f'{band}-{direction}-{size}-ftp_datavalues.csv', report_path_date_time)
+                        # except Exception as e:
+                        #     logger.error(f"failed to create ftp_datavalues csv of {band} {direction} {size}")
+                        try:
+                            # print(f"this is the self.individual_device_csv_names in shutil {self.individual_device_csv_names}")
+                            print(f"this is the {self.individual_device_csv_list}")
+                            for csv_name in self.individual_device_csv_list:
+                                shutil.move(f"{csv_name}.csv", report_path_date_time)
+                        except Exception as e:
+                            logger.error(f"failed to create individual device csv of {band} {direction} {size}")
             try:
-                shutil.move('all_l4_data.csv', report_path_date_time)
-            except Exception:
-                logger.error("failed to create all layer 4 csv")
-            for csv_name in self.individual_device_csv_names:
-                shutil.move(f"{csv_name}.csv", report_path_date_time)
-        self.report.set_title("FTP Test Including IoT Devices" if iot_summary else "FTP Test")
+                shutil.move(f'all_l4_data.csv', report_path_date_time)
+            except Exception as e:
+                logger.error(f"failed to create all layer 4 csv")
+            try:   
+                shutil.move(f'ftp_datavalues.csv', report_path_date_time)
+            except Exception as e:
+                logger.error(f"failed to create ftp_datavalues csv")
+        # if self.clients_type == "Real":
+        #     shutil.move('ftp_datavalues.csv', report_path_date_time)
+        #     try:
+        #         shutil.move('all_l4_data.csv', report_path_date_time)
+        #     except Exception:
+        #         logger.error("failed to create all layer 4 csv")
+        #     for csv_name in self.individual_device_csv_names:
+        #         shutil.move(f"{csv_name}.csv", report_path_date_time)
+        self.report.set_title("FTP Test")
         self.report.set_date(date)
         self.report.build_banner()
         self.report.set_table_title("Test Setup Information")
@@ -2208,55 +2101,13 @@ class FtpTest(LFCliBase):
                 "Traffic Direction": self.direction,
                 "Traffic Duration ": duration
             }
-        if self.robot_test:
-            # Added Robot details in Test setup information table
-            test_setup_info["Robot IP"] = self.robot_ip
-            test_setup_info["Coordinates"] = self.coordinate
-            if self.rotation_enabled:
-                test_setup_info["Rotations"] = self.rotation
-
-        if iot_summary:
-            test_setup_info = with_iot_params_in_table(test_setup_info, iot_summary)
-            self.report.set_obj_html(
-                "Objective",
-                "The Candela FTP Test Including IoT Devices is designed to verify an Access Point’s performance and stability "
-                "when handling both Real clients (Android, Windows, Linux, iOS) and IoT devices (controlled via Home Assistant). "
-                "For Real clients, the test measures simultaneous file download and upload operations over a specified band from "
-                "an FTP server, capturing metrics such as transfer time and throughput to validate that the AP can support "
-                "multiple clients efficiently. "
-                "For IoT clients, the test concurrently executes device-specific actions (e.g., camera streaming, switch toggling, "
-                "lock/unlock) and monitors success rate, latency, and failure rate. "
-                "The goal is to ensure that the AP can reliably manage FTP traffic for multiple Real clients while maintaining "
-                "responsive and consistent control of IoT devices."
-            )
-        else:
-            self.report.set_obj_html(
-                "Objective",
-                "This FTP Test is used to Verify that N clients connected on Specified band and can "
-                "simultaneously download some amount of file from FTP server and measuring the "
-                "time taken by client to Download the file."
-            )
         self.report.test_setup_table(value="Test Setup Information", test_setup_data=test_setup_info)
-        self.report.build_objective()
-        if self.robot_test:
-            if self.dowebgui:
-                # To store heatmap images in report
-                self.add_live_view_images_to_report()
 
-            # Unified iteration for rotation and non-rotation
-            if self.rotation_enabled:
-                for coord, rotation_dict in self.robot_data.items():
-                    for rotation, robot_info in rotation_dict.items():
-                        self.build_graphs_and_table(coord, rotation, robot_info, client_list)
-            else:
-                for coord, robot_info in self.robot_data.items():
-                    self.build_graphs_and_table(coord, None, robot_info, client_list)
-            # Finalizing the report after robot test graphs and tables
-            self.report.build_footer()
-            html_file = self.report.write_html()
-            logger.info(f"Returned file {html_file}")
-            self.report.write_pdf()
-            return
+        self.report.set_obj_html("Objective",
+                                 "This FTP Test is used to Verify that N clients connected on Specified band and can "
+                                 "simultaneously download some amount of file from FTP server and measuring the "
+                                 "time taken by client to Download the file.")
+        self.report.build_objective()
         # self.report.set_obj_html("PASS/FAIL Results",
         #                          "This Table will give Pass/Fail results.")
         # self.report.build_objective()
@@ -2407,8 +2258,6 @@ class FtpTest(LFCliBase):
             dataframe1 = pd.DataFrame(dataframe)
             self.report.set_table_dataframe(dataframe1)
             self.report.build_table()
-        if iot_summary:
-            self.build_iot_report_section(self.report, iot_summary)
         self.report.build_footer()
         html_file = self.report.write_html()
         logger.info("returned file {}".format(html_file))
@@ -2812,188 +2661,6 @@ class FtpTest(LFCliBase):
             logger.error('No cross connections created, aborting test')
             exit(1)
 
-    def build_iot_report_section(self, report, iot_summary):
-        """
-        Handles all IoT-related charts, tables, and increment-wise reports.
-        """
-        outdir = report.path_date_time
-        os.makedirs(outdir, exist_ok=True)
-
-        def copy_into_report(raw_path, new_name):
-            """Resolve and copy image into report dir."""
-            if not raw_path:
-                return None
-
-            abs_src = os.path.abspath(raw_path)
-            if not os.path.exists(abs_src):
-                # Search recursively under 'results' if absolute path missing
-                for root, _, files in os.walk(os.path.join(os.getcwd(), "results")):
-                    if os.path.basename(raw_path) in files:
-                        abs_src = os.path.join(root, os.path.basename(raw_path))
-                        break
-                else:
-                    return None
-
-            dst = os.path.join(outdir, new_name)
-            if os.path.abspath(abs_src) != os.path.abspath(dst):
-                shutil.copy2(abs_src, dst)
-            return new_name
-
-        # section header
-        report.set_custom_html('<div style="page-break-before: always;"></div>')
-        report.build_custom()
-        report.set_custom_html('<h2><u>IoT Results</u></h2>')
-        report.build_custom()
-
-        # Statistics
-        stats_png = copy_into_report(iot_summary.get("statistics_img"), "iot_statistics.png")
-        if stats_png:
-            report.build_chart_title("Test Statistics")
-            report.set_custom_html(f'<img src="{stats_png}" style="width:100%; height:auto;">')
-            report.build_custom()
-
-        # Request vs Latency
-        rvl_png = copy_into_report(iot_summary.get("req_vs_latency_img"), "iot_request_vs_latency.png")
-        if rvl_png:
-            report.build_chart_title("Request vs Average Latency")
-            report.set_custom_html(f'<img src="{rvl_png}" style="width:100%;">')
-            report.build_custom()
-
-        # Overall results table
-        ort = iot_summary.get("overall_result_table") or {}
-        if ort:
-            rows = [{
-                "Device": dev,
-                "Min Latency (ms)": stats.get("min_latency"),
-                "Avg Latency (ms)": stats.get("avg_latency"),
-                "Max Latency (ms)": stats.get("max_latency"),
-                "Total Iterations": stats.get("total_iterations"),
-                "Success Iters": stats.get("success_iterations"),
-                "Failed Iters": stats.get("failed_iterations"),
-                "No-Response Iters": stats.get("no_response_iterations"),
-            } for dev, stats in ort.items()]
-
-            df_overall = pd.DataFrame(rows).round(2)
-
-            report.set_custom_html('<div style="page-break-inside: avoid;">')
-            report.build_custom()
-            report.set_obj_html(_obj_title="Overall IoT Result Table", _obj=" ")
-            report.build_objective()
-            report.set_table_dataframe(df_overall)
-            report.build_table()
-            report.set_custom_html('</div>')
-            report.build_custom()
-
-        # Increment reports
-        inc = iot_summary.get("increment_reports") or {}
-        if inc:
-            report.set_custom_html('<h3>Reports by Increment Steps</h3>')
-            report.build_custom()
-
-            for step_name, rep in inc.items():
-
-                report.set_custom_html(f'<h4><u>{step_name.replace("_", " ")}</u></h4>')
-                report.build_custom()
-
-                # Latency graph
-                lat_png = copy_into_report(rep.get("latency_graph"), f"iot_{step_name}_latency.png")
-                if lat_png:
-                    report.build_chart_title("Average Latency")
-                    report.set_custom_html(f'<img src="{lat_png}" style="width:100%; height:auto;">')
-                    report.build_custom()
-
-                # Success count graph
-                res_png = copy_into_report(rep.get("result_graph"), f"iot_{step_name}_results.png")
-                if res_png:
-                    report.build_chart_title("Success Count")
-                    report.set_custom_html(f'<img src="{res_png}" style="width:100%; height:auto;">')
-                    report.build_custom()
-
-                # Tabular data for detailed iteration-level results
-                data_rows = rep.get("data") or []
-                if data_rows:
-                    df = pd.DataFrame(data_rows).rename(
-                        columns={"latency__ms": "Latency_ms", "latency_ms": "Latency_ms"}
-                    )
-                    if "Latency_ms" in df.columns:
-                        df["Latency_ms"] = pd.to_numeric(df["Latency_ms"], errors="coerce").round(3)
-                    if "Result" in df.columns:
-                        df["Result"] = df["Result"].map(lambda x: "Success" if bool(x) else "Failure")
-
-                    desired_cols = ["Iteration", "Device", "Current State", "latency (ms)", "Result"]
-                    df = df[[c for c in desired_cols if c in df.columns]]
-
-                    report.set_table_dataframe(df)
-                    report.build_table()
-
-                report.set_custom_html('<hr>')
-                report.build_custom()
-
-    def perform_robo(self):
-        """
-        Controls robot movement through a list of coordinates.
-        At each coordinate, optionally performs rotations and runs the test.
-        Handles battery charging and user stop conditions safely.
-        """
-
-        if self.rotation_list[0] != "":
-            self.rotation_enabled = True
-
-        self.robot_obj = RobotClass()
-        self.robot_obj.robo_ip = self.robot_ip
-        base_dir = os.path.dirname(os.path.dirname(self.result_dir))
-        nav_data = os.path.join(base_dir, 'nav_data.json')  # To generate nav_data.json in webgui folder
-        self.robot_obj.nav_data_path = nav_data
-        self.robot_obj.create_waypointlist()
-        test_stopped_by_user = False
-        self.robot_obj.ip = self.host
-        self.robot_obj.testname = self.test_name
-        self.robot_obj.runtime_dir = self.result_dir
-        for coordinate in range(len(self.coordinate_list)):
-            if test_stopped_by_user:
-                break
-            # Check for battery status before moving to next coordinate
-            if_paused, test_stopped_by_user = self.robot_obj.wait_for_battery()
-            # If test is stopped by user during battery wait
-            if test_stopped_by_user:
-                break
-            robo_moved, abort = self.robot_obj.move_to_coordinate(self.coordinate_list[coordinate])
-            # If robot failed to reach the coordinate
-            if abort:
-                break
-            # If robot reached the coordinate
-            if robo_moved:
-                self.current_coordinate = self.coordinate_list[coordinate]
-                # if no rotation mode
-                if not self.rotation_enabled:
-                    # Start the test
-                    self.start(False, False)
-                    test_stopped_by_user = self.monitor_for_runtime_csv()
-                    self.my_monitor_for_real_devices()
-                    self.stop()
-                    self.update_stop_status_robot()
-
-                # if rotation mode
-                else:
-                    for angle in range(len(self.rotation_list)):
-                        # Check for battery status before rotating to next angle
-                        is_paused, test_stopped_by_user = self.robot_obj.wait_for_battery()
-                        # If test is stopped by user during battery wait
-                        if test_stopped_by_user:
-                            break
-                        robo_rotated = self.robot_obj.rotate_angle(self.rotation_list[angle])
-                        if robo_rotated:
-                            # Start the test if robot rotated to the angle
-                            self.current_angle = self.rotation_list[angle]
-                            self.start(False, False)
-                            test_stopped_by_user = self.monitor_for_runtime_csv()
-                            self.my_monitor_for_real_devices()
-                            self.stop()
-                            self.update_stop_status_robot()
-                        # If test is stopped by user
-                        if test_stopped_by_user:
-                            break
-
 
 def validate_args(args):
     """Validate CLI arguments."""
@@ -3050,126 +2717,6 @@ def validate_args(args):
     elif args.config and args.device_list != [] and (args.ssid is None or args.passwd is None or args.security is None):
         logger.error("Please provide SSID, password, and security when device list is given")
         exit(1)
-
-
-def duration_to_seconds(duration: str) -> int:
-    duration = duration.strip().lower()
-    if duration.endswith("s"):
-        return int(duration[:-1])
-    elif duration.endswith("m"):
-        return int(duration[:-1]) * 60
-    elif duration.endswith("h"):
-        return int(duration[:-1]) * 3600
-    else:
-        return int(duration)
-
-
-def with_iot_params_in_table(base: dict, iot_summary) -> dict:
-    """
-    Append IoT params into the existing Throughput Input Parameters table.
-    Adds: IoT Test name, IoT Iterations, IoT Delay (s), IoT Increment.
-    Accepts dict or JSON string.
-    """
-    print("function called with iot params-----")
-    try:
-        if not iot_summary:
-            return base
-        if isinstance(iot_summary, str):
-            try:
-                iot_summary = json.loads(iot_summary)
-            except Exception:
-                start = iot_summary.find("{")
-                end = iot_summary.rfind("}")
-                if start == -1 or end == -1 or end <= start:
-                    return base
-                try:
-                    iot_summary = json.loads(iot_summary[start:end + 1])
-                except Exception:
-                    return base
-
-        ti = (iot_summary.get("test_input_table") or {})
-        out = OrderedDict(base)
-        out["IoT Test name"] = ti.get("Testname", "")
-        out["Iot Device List"] = ti.get("Device List", "")
-        out["IoT Iterations"] = ti.get("Iterations", "")
-        out["IoT Delay (s)"] = ti.get("Delay (seconds)", "")
-        out["IoT Increment"] = ti.get("Increment Pattern", "")
-        return out
-    except Exception:
-        return base
-
-
-def trigger_iot(ip, port, iterations, delay, device_list, testname, increment):
-    """
-    Entry point to start the IoT test in a separate thread.
-    This function is called from the throughput test script when IoT testing
-    is enabled. It wraps the asynchronous `run_iot()`.
-    """
-    asyncio.run(run_iot(ip, port, iterations, delay, device_list, testname, increment))
-
-
-async def run_iot(ip: str = '127.0.0.1',
-                  port: str = '8000',
-                  iterations: int = 1,
-                  delay: int = 5,
-                  device_list: str = '',
-                  testname: str = '',
-                  increment: str = ''):
-    try:
-
-        if delay < 5:
-            logger.error('The minimum delay should be 5 seconds.')
-            exit(1)
-
-        if device_list != '':
-            device_list = device_list.split(',')
-        else:
-            device_list = None
-        # Parse and validate increment pattern if provided
-        if increment:
-            print("the increment is : ", increment)
-            try:
-                increment = list(map(int, increment.split(',')))
-                if any(i < 1 for i in increment):
-                    logger.error('Increment values must be positive integers')
-                    exit(1)
-            except ValueError:
-                logger.error('Invalid increment format. Please provide comma-separated integers (e.g., "1,3,5")')
-                exit(1)
-
-        testname = testname
-
-        # Ensure test name is unique (avoid overwriting previous results)
-        if testname in os.listdir('../../local/interop-webGUI/IoT/scripts/results/'):
-            logger.error('Test with same name already existing. Please give a different testname.')
-            exit(1)
-        automation = Automation(ip=ip,
-                                port=port,
-                                iterations=iterations,
-                                delay=delay,
-                                device_list=device_list,
-                                testname=testname,
-                                increment=increment)
-
-        # fetch the available iot devices
-        automation.devices = await automation.fetch_iot_devices()
-
-        # select the iot devices for testing
-        automation.select_iot_devices()
-
-        # run the iot test on selected devices
-        automation.run_test()
-
-        # generate the iot report
-        automation.generate_report()
-
-    except Exception as e:
-        logger.error(f"Iot Test failed: {str(e)}")
-        raise
-
-    await automation.session.close()
-
-    logger.info('Iot Test Completed.')
 
 
 def main():
@@ -3253,16 +2800,6 @@ Command Line Interface to run download scenario by Configuring Devices in Groups
 python3 lf_ftp.py --file_sizes 1MB --mgr 192.168.213.218 --traffic_duration 1m  --directions Download --clients_type Real  --bands 5G
  --upstream_port eth1 --file_name g219 --group_name grp1 --profile_name Open3 --expected_passfail_value 3 --wait_time 30
 
- EXAMPLE-14:
-Command Line Interface to run download scenario for Real clients with only coordinates
-python3 lf_ftp.py --ssid Netgear-5g --passwd sharedsecret --file_sizes 10MB --mgr 192.168.207.78 --traffic_duration 1m
---security wpa2 --directions Download --clients_type Real --ap_name Netgear --bands 5G --upstream_port eth1 --robot_test --robot_ip 192.168.204.101 --coordinate 3,4
-
-EXAMPLE-15:
-Command Line Interface to run download scenario for Real clients with coordinates and rotations
-python3 lf_ftp.py --ssid Netgear-5g --passwd sharedsecret --file_sizes 10MB --mgr 192.168.207.78 --traffic_duration 1m
---security wpa2 --directions Download --clients_type Real --ap_name Netgear --bands 5G --upstream_port eth1 --robot_test --robot_ip 192.168.204.101 --coordinate 3,4 --rotation 30,45
-
 SCRIPT_CLASSIFICATION : Test
 
 SCRIPT_CATEGORIES:   Performance,  Functional,  Report Generation
@@ -3336,6 +2873,7 @@ INCLUDE_IN_README: False
     optional.add_argument('--device_csv_name', type=str, help='Enter the csv name to store expected url values', default=None)
     optional.add_argument('--wait_time', type=int, help='Enter the maximum wait time for configurations to apply', default=60)
     optional.add_argument('--config', action="store_true", help='Specify for configuring the devices')
+    optional.add_argument('--timeBreak',type=int, help="time break to get the ftp results")
     # kpi_csv arguments
     optional.add_argument(
         "--test_rig",
@@ -3393,11 +2931,6 @@ INCLUDE_IN_README: False
 
     optional.add_argument('--get_live_view', help="If true will heatmap will be generated from testhouse automation WebGui ", action='store_true')
     optional.add_argument('--total_floors', help="Total floors from testhouse automation WebGui ", default="0")
-    # robot test arguments
-    optional.add_argument("--robot_test", help='to trigger robot test', action='store_true')
-    optional.add_argument('--robot_ip', type=str, default='', help='hostname for where Robot server is running')
-    optional.add_argument('--coordinate', type=str, default='', help="The coordinate contains list of coordinates to be ")
-    optional.add_argument('--rotation', type=str, default='', help="The set of angles to rotate at a particular point")
     # logging configuration
     optional.add_argument(
         "--lf_logger_config_json",
@@ -3405,39 +2938,7 @@ INCLUDE_IN_README: False
 
     # help summary
     optional.add_argument('--help_summary', action="store_true", help='Show summary of what this script does')
-    # IoT test arguments
-    parser.add_argument('--iot_test', help="If true will execute script for iot", action='store_true')
-    optional.add_argument('--iot_ip',
-                          default='127.0.0.1',
-                          help='IP of the server')
 
-    optional.add_argument('--iot_port',
-                          default='8000',
-                          help='Port of the server')
-    optional.add_argument('--iot_iterations',
-                          type=int,
-                          default=1,
-                          help='Iterations to run the test')
-
-    optional.add_argument('--iot_delay',
-                          type=int,
-                          default=5,
-                          help='Delay in seconds between iterations (min. 5 seconds)')
-
-    optional.add_argument('--iot_device_list',
-                          type=str,
-                          default='',
-                          help='Entity IDs of the devices to include in testing (comma separated)')
-
-    optional.add_argument('--iot_testname',
-                          type=str,
-                          default='',
-                          help='Testname for reporting')
-
-    optional.add_argument('--iot_increment',
-                          type=str,
-                          default='',
-                          help='Comma-separated list of device counts to incrementally test (e.g., "1,3,5")')
     args = parser.parse_args()
 
     help_summary = '''\
@@ -3463,34 +2964,6 @@ some amount of file data from the FTP server while measuring the time taken by c
 
     # empty dictionary for whole test data
     ftp_data = {}
-    if args.iot_test:
-        iot_ip = args.iot_ip
-        iot_port = args.iot_port
-        iot_iterations = args.iot_iterations
-        iot_delay = args.iot_delay
-        iot_device_list = args.iot_device_list
-        iot_testname = args.iot_testname
-        iot_increment = args.iot_increment
-        if args.iot_iterations > 1:
-            thread = threading.Thread(target=trigger_iot, args=(iot_ip, iot_port, iot_iterations, iot_delay, iot_device_list, iot_testname, iot_increment))
-            thread.start()
-        else:
-            total_secs = duration_to_seconds(args.traffic_duration)
-            iot_iterations = max(1, total_secs // args.iot_delay)
-            iot_thread = threading.Thread(
-                target=trigger_iot,
-                args=(
-                    args.iot_ip,
-                    args.iot_port,
-                    iot_iterations,
-                    args.iot_delay,
-                    args.iot_device_list,
-                    args.iot_testname,
-                    args.iot_increment
-                ),
-                daemon=True
-            )
-            iot_thread.start()
 
     def pass_fail_duration(band, file_size):
         '''Method for set duration according file size and band which are given by user'''
@@ -3535,6 +3008,10 @@ some amount of file data from the FTP server while measuring the time taken by c
         args.traffic_duration = int(args.traffic_duration)
 
     # For all combinations ftp_data of directions, file size and client counts, run the test
+    indv_device_csv_list = []
+    # print(f"this is args.timebreak: {args.timeBreak}")
+    # exit(1)
+    
     for band in args.bands:
         for direction in args.directions:
             for file_size in args.file_sizes:
@@ -3589,10 +3066,7 @@ some amount of file data from the FTP server while measuring the time taken by c
                               config=args.config,
                               get_live_view=args.get_live_view,
                               total_floors=args.total_floors,
-                              robot_test=args.robot_test,
-                              robot_ip=args.robot_ip,
-                              coordinate=args.coordinate,
-                              rotation=args.rotation,
+                              timeBreak = args.timeBreak if args.timeBreak is not None else 5
                               )
 
                 interation_num = interation_num + 1
@@ -3635,18 +3109,17 @@ some amount of file data from the FTP server while measuring the time taken by c
                 # First time stamp
                 time1 = datetime.now()
                 logger.info("Traffic started running at %s", time1)
-                if args.robot_test:
-                    # Perform robot-specific operations
-                    obj.perform_robo()
+                obj.start(False, False)
+                # to fetch runtime values during the execution and fill the csv.
+                if args.dowebgui or args.clients_type == "Real":
+                    obj.monitor_for_runtime_csv(band,direction,file_size,indv_device_csv_list)
+                    obj.my_monitor_for_real_devices()
                 else:
-                    obj.start(False, False)
-                    # to fetch runtime values during the execution and fill the csv.
-                    if args.dowebgui or args.clients_type == "Real":
-                        obj.monitor_for_runtime_csv()
-                        obj.my_monitor_for_real_devices()
-                    else:
-                        time.sleep(args.traffic_duration)
-                        obj.my_monitor()
+                    # time.sleep(args.traffic_duration)
+                    obj.my_monitor()
+                    obj.monitor_virtual(band,direction,file_size,indv_device_csv_list)
+
+                    
 
                 # # return list of download/upload completed time stamp
                 # time_list = obj.my_monitor(time1)
@@ -3658,8 +3131,8 @@ some amount of file data from the FTP server while measuring the time taken by c
                 # ftp_data[interation_num] = obj.ftp_test_data(time_list, pass_fail, args.bands, args.file_sizes,
                 #                                              args.directions, args.num_stations)
                 # # print("pass_fail_duration - ftp_data:{ftp_data}".format(ftp_data=ftp_data))
-                    obj.stop()
-                    print("Traffic stopped running")
+                obj.stop()
+                print("Traffic stopped running")
 
                 obj.postcleanup()
                 time2 = datetime.now()
@@ -3686,39 +3159,26 @@ some amount of file data from the FTP server while measuring the time taken by c
         "Security": args.security,
         "Contact": "support@candelatech.com"
     }
-    if args.robot_test:
-        # If robot test is enabled, add robot specific info to the report
-        input_setup_info["Robot IP"] = args.robot_ip
-        input_setup_info["Coordinate"] = args.coordinate
-        input_setup_info["Rotation"] = args.rotation
-
     # FOR WEB-UI // to fetch the last logs of the execution.
-    if args.dowebgui and not args.robot_test:
+    if args.dowebgui:
         obj.data_for_webui["status"] = ["STOPPED"] * len(obj.url_data)
 
         df1 = pd.DataFrame(obj.data_for_webui)
         df1.to_csv('{}/ftp_datavalues.csv'.format(obj.result_dir), index=False)
-    iot_summary = None
-    if args.iot_test and args.iot_testname:
-        base = os.path.join("results", args.iot_testname)
-        p = os.path.join(base, "iot_summary.json")
-        if os.path.exists(p):
-            with open(p) as f:
-                iot_summary = json.load(f)
     # Report generation when groups are specified
     if args.group_name:
         obj.generate_report(ftp_data, date, input_setup_info, test_rig=args.test_rig,
                             test_tag=args.test_tag, dut_hw_version=args.dut_hw_version,
                             dut_sw_version=args.dut_sw_version, dut_model_num=args.dut_model_num,
                             dut_serial_num=args.dut_serial_num, test_id=args.test_id,
-                            bands=args.bands, csv_outfile=args.csv_outfile, local_lf_report_dir=args.local_lf_report_dir, config_devices=configuration, iot_summary=iot_summary)
+                            bands=args.bands,directions=args.directions,file_sizes=args.file_sizes, csv_outfile=args.csv_outfile, local_lf_report_dir=args.local_lf_report_dir, config_devices=configuration)
     # Generating report without group-specific device configuration
     else:
         obj.generate_report(ftp_data, date, input_setup_info, test_rig=args.test_rig,
                             test_tag=args.test_tag, dut_hw_version=args.dut_hw_version,
                             dut_sw_version=args.dut_sw_version, dut_model_num=args.dut_model_num,
                             dut_serial_num=args.dut_serial_num, test_id=args.test_id,
-                            bands=args.bands, csv_outfile=args.csv_outfile, local_lf_report_dir=args.local_lf_report_dir, iot_summary=iot_summary)
+                            bands=args.bands,directions=args.directions,file_sizes=args.file_sizes, csv_outfile=args.csv_outfile, local_lf_report_dir=args.local_lf_report_dir)
 
     if args.dowebgui:
         obj.copy_reports_to_home_dir()

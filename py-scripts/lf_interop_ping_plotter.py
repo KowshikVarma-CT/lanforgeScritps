@@ -90,6 +90,7 @@
 '''
 
 import argparse
+import re
 import time
 import sys
 import os
@@ -203,9 +204,197 @@ class Ping(Realm):
         self.wait_time = wait_time
         self.floors = floors
         self.get_live_view = get_live_view
+        # self.realtimedata = {}
+        # self.real_time_seq = 0
+        self.last_written_seq = {}
+        self.last_Result_per_Station = {}
+        
+    # def generate_real_time_csv(self):
+    #     # print(f"this is the real time data {self.realtimedata}")
+    #     row = []
+    #     with open('overAllPing.csv', 'a', newline='') as file:
+    #         writer = csv.writer(file)
+    #         if os.path.getsize('overAllPing.csv') == 0:
+    #             header = ['Timestamp']
+    #             for device_name in self.sta_list:
+    #                 sta = device_name.split('.')[-1]
+    #                 header.extend([
+    #                     f'{sta}-RTT',
+    #                     f'{sta}-Sent',
+    #                     f'{sta}-Received',
+    #                     f'{sta}-Dropped'
+    #                 ])
+    #             writer.writerow(header)
+    #         file.flush()
+    #         os.fsync(file.fileno())
+    #     timestamp = ((self.real_time_seq) * timedelta(seconds=int(self.interval)) + self.start_time).strftime("%d/%m/%Y %H:%M:%S")
+    #     for device_name, device_data in self.realtimedata.items():
+    #         rtt = 0
+    #         lastresult = device_data['last_result']
+    #         print(f"{lastresult}")
+    #         match = re.search(r'icmp_seq=(\d+)', lastresult)
+    #         icmp_seq = 0
+    #         if match:
+    #             icmp_seq = int(match.group(1))
+    #             print(f"this is the icmp seq {icmp_seq} and this is the real time seq {self.real_time_seq}")
+    #             rtt = device_data['rtts'][self.real_time_seq] 
+    #             # logger.info(f"this is the icmp seq {icmp_seq}")
+    #         if icmp_seq:
+    #             print(f"icmp seq found :: {icmp_seq} and this is self.real {self.real_time_seq-1}",)
+    #             # timestamp = ((icmp_seq) * timedelta(seconds=int(self.interval)) + self.start_time).strftime("%d/%m/%Y %H:%M:%S")
+    #             # logger.info(f"this is the last result for device {device_name} at {timestamp} lastresult :{lastresult != ''}")
+    #             self.realtimedata[device_name]['ping_stats']['sent'].append(str(int(self.realtimedata[device_name]['ping_stats']['sent'][-1]) + 1))
+                
+    #             if rtt == 0:
+    #                 self.realtimedata[device_name]['ping_stats']['dropped'].append(str(int(self.realtimedata[device_name]['ping_stats']['dropped'][-1]) + 1))
+    #                 self.realtimedata[device_name]['ping_stats']['received'].append(str(int(self.realtimedata[device_name]['ping_stats']['received'][-1])))
+    #             else:
+    #                 self.realtimedata[device_name]['ping_stats']['received'].append(str(int(self.realtimedata[device_name]['ping_stats']['received'][-1]) + 1))
+    #                 self.realtimedata[device_name]['ping_stats']['dropped'].append(str(int(self.realtimedata[device_name]['ping_stats']['dropped'][-1])))
+    #             row.extend([rtt,self.realtimedata[device_name]['ping_stats']['sent'][-1],self.realtimedata[device_name]['ping_stats']['received'][-1],self.realtimedata[device_name]['ping_stats']['dropped'][-1]])
+    #         else:
+    #             row.extend([rtt,self.realtimedata[device_name]['ping_stats']['sent'][-1],self.realtimedata[device_name]['ping_stats']['received'][-1],self.realtimedata[device_name]['ping_stats']['dropped'][-1]])
+    #     row.insert(0, timestamp)
+    #     with open('overAllPing.csv', 'a', newline='') as file:
+    #         writer = csv.writer(file)
+    #         writer.writerow(row)
+    #         file.flush()
+    #         os.fsync(file.fileno())
+    #     time.sleep(int(self.interval)-1)
+    #     self.real_time_seq += 1
+    
+    def generate_real_time_csv(self):
+        for device_name, device_data in self.result_json.items():
+            if 'rtts' not in device_data:
+                continue
+            start_time = self.start_time
+            interval = timedelta(seconds=int(self.interval))
+            csv_file = f"generic-{device_name}.csv"
+            # Create file + header if not exists
+            file_exists = os.path.exists(csv_file)
+            with open(csv_file, 'a', newline='') as file:
+                writer = csv.writer(file)
+                if not file_exists or os.path.getsize(csv_file) == 0:
+                    writer.writerow(['Time', 'RTT (ms)', 'Sent', 'Received', 'Dropped'])
+                sorted_seqs = sorted(device_data['rtts'].keys(), key=int)
+                # Get last written sequence for this station
+                last_written_seq = self.last_written_seq.get(device_name, 0)
+                for seq in sorted_seqs:
+                    # if device_data['rtts'][seq] == 0.11:
+                    #     continue
+                    seq = int(seq)
+                    # Skip already written sequences
+                    if seq <= last_written_seq:
+                        continue
+                    # print(f"{device_data['rtts']}")
+                    rtt = device_data['rtts'][seq]
+                    
+                    timestamp = (
+                        (seq - 1) * interval + start_time
+                    ).strftime("%d/%m/%Y %H:%M:%S")
+                    if device_name not in self.last_Result_per_Station:
+                        sent = 1
+                        received = 0 if rtt == 0 else 1
+                        dropped = 1 if rtt == 0 else 0
+                    else:
+                        last_sent = self.last_Result_per_Station[device_name][2]
+                        last_received = self.last_Result_per_Station[device_name][3]
+                        last_dropped = self.last_Result_per_Station[device_name][4]
+                        sent = last_sent + 1
+                        if rtt == 0:
+                            received = last_received
+                            dropped = last_dropped + 1
+                        else:
+                            received = last_received + 1
+                            dropped = last_dropped
+                    self.last_Result_per_Station[device_name] = [
+                        timestamp, rtt, sent, received, dropped
+                        ]
+                    # Store latest stats
+                    if rtt != 0.11:
+                        
+                        # Write row
+                        writer.writerow([timestamp, rtt, sent, received, dropped])
+                        # Update last written sequence
+                        self.last_written_seq[device_name] = seq
 
+
+        
+        
+    
+    def processEntry(self, entry, stats_pertime):
+        ts = entry["timestamp"]
+        print(entry)
+        sta = entry["station"].split('.')[-1]
+        # Initialize timestamp bucket 
+        if ts not in stats_pertime:
+            stats_pertime[ts] = {
+                "timestamp": ts,
+                "stations": {}
+            }
+        #Store station data 
+        stats_pertime[ts]["stations"][sta] = {
+            "rtt": entry["rtt"],
+            "sent": entry["sent"],
+            "received": entry["recv"],
+            "dropped": entry["dropped"]
+        }
+        # with open("")
+        # #When ALL stations reported 
+        # while len(stats_pertime[ts]["stations"]) != len(self.sta_list):
+        #     time.sleep(0.5)
+        # logging.info(stats_pertime[ts]['timestamp'])
+
+        if len(stats_pertime[ts]["stations"]) == len(self.sta_list):
+            file_path = "overAllPing.csv"
+            with open(file_path, "a", newline="") as file:
+                writer = csv.writer(file)
+                # header
+                if os.path.getsize("overAllPing.csv") == 0:
+                    header = ["Time"]
+                    for sta_name in sorted(self.sta_list):
+                        sta_short = sta_name.split('.')[-1]
+                        header.extend([
+                            f"{sta_short}-RTT",
+                            f"{sta_short}-Sent",
+                            f"{sta_short}-Received",
+                            f"{sta_short}-Dropped"
+                        ])
+                    writer.writerow(header)
+                #  Build combined row with data manipulation 
+                row = [stats_pertime[ts]["timestamp"]]
+                for sta_name in sorted(self.sta_list):
+                    sta_short = sta_name.split('.')[-1]
+                    stats = stats_pertime[ts]["stations"].get(sta_short, {
+                        "rtt": 0, "sent": 0, "received": 0, "dropped": 0
+                    })
+                    # Apply the same logic as the second code snippet
+                    # Increment sent counter
+                    sent_val = stats["sent"]
+                    # If RTT is 0, increment dropped, keep received same
+                    if stats["rtt"] == 0:
+                        dropped_val = stats["dropped"]
+                        received_val = stats["received"]
+                    else:
+                        # If RTT is not 0, increment received, keep dropped same
+                        received_val = stats["received"]
+                        dropped_val = stats["dropped"]
+                    row.extend([
+                        stats["rtt"],
+                        sent_val,
+                        received_val,
+                        dropped_val
+                    ])
+                writer.writerow(row)
+                file.flush()
+                os.fsync(file.fileno())
+            #  Remove timestamp bucket after writing 
+            del stats_pertime[ts]
+        # else:
+            
+
+            
     def change_target_to_ip(self):
-
         # checking if target is an IP or a port
         if self.target.count('.') != 3 and self.target.split('.')[-2].isnumeric():
             # checking if target is eth1 or 1.1.eth1
@@ -349,6 +538,7 @@ class Ping(Realm):
         station_object.set_command_flag("add_sta", "create_admin_down", 1)
         station_object.set_command_param("set_port", "report_timer", 1500)
         station_object.set_command_flag("set_port", "rpt_timer", 1)
+        print(f"this is the station list : {self.sta_list}")
         station_object.create(radio=self.radio, sta_names_=self.sta_list)
         station_object.admin_up()
         if Realm.wait_for_ip(self=self, station_list=self.sta_list, timeout_sec=-1):
@@ -390,12 +580,13 @@ class Ping(Realm):
             self.generic_endps_profile.set_report_timer(endp_name=endpoint, timer=250)
 
     def start_generic(self):
-        self.generic_endps_profile.start_cx()
+        self.generic_endps_profile.start_cx() #generally sets the state of the cx to running
         self.start_time = datetime.now()
 
     def stop_generic(self):
         self.generic_endps_profile.stop_cx()
         self.stop_time = datetime.now()
+    
 
     def get_results(self):
         # logging.info(self.generic_endps_profile.created_endp)
@@ -526,6 +717,8 @@ class Ping(Realm):
         # ticks_sequence_numbers.sort()
         sequence_numbers.sort()
         timestamps.sort()
+        # print(f"this is the sorted sequence numbers {sequence_numbers}")
+        # print(f"this is the sorted timestamps {timestamps}")
         # print('--------------')
         # print(ticks_sequence_numbers[0::10])
         # print(timestamps[0::10])
@@ -560,12 +753,57 @@ class Ping(Realm):
 
         logger.debug("{}.png".format("uptime_graph"))
         return ("%s.png" % "uptime_graph")
+    
+
+    def generate_combined_csv(self, path_date_time, timestamps, result_json):
+        # print(f"---------{timestamps}")
+        with open(f'{path_date_time}/combined.csv', 'w', newline='') as file:
+            writer = csv.writer(file)
+            # ---- STEP 1: Build header ----
+            header = ['Time']
+            sta_names = []
+
+            for device_name in result_json:
+                sta = device_name.split('.')[-1]   
+                sta_names.append(device_name)
+                header.extend([
+                    f'{sta}-RTT',
+                    f'{sta}-Sent',
+                    f'{sta}-Received',
+                    f'{sta}-Dropped'
+                ])
+            writer.writerow(header)
+            for row in range(len(timestamps)):
+                row_data = [timestamps[row]]
+
+                for device_name in sta_names:
+                    try:
+                        rtt = (
+                        list(result_json[device_name]['rtts'].values())[row]
+                        if result_json[device_name]['rtts']
+                        else 0
+                        )
+                    except IndexError:
+                        rtt = 0
+                    try:
+                        sent = result_json[device_name]['ping_stats']['sent'][row]
+                        received = result_json[device_name]['ping_stats']['received'][row]
+                        dropped = result_json[device_name]['ping_stats']['dropped'][row]
+                        row_data.extend([rtt, sent, received, dropped])
+                    except IndexError:
+                        row_data.extend([rtt, '', '', ''])
+                writer.writerow(row_data)
+
+            
+            
 
     def build_area_graphs(self, report_obj=None):
         json_data = self.graph_values
         device_names = list(json_data.keys())
 
         # Plot line graphs for each device
+        # print(f"this is the json data --------- {json_data}")
+
         for device_name, device_data in json_data.items():
             rtts = []
             # dropped_seqs = []
@@ -601,6 +839,7 @@ class Ping(Realm):
 
             # generating csv
             with open('{}/{}.csv'.format(report_obj.path_date_time, device_name), 'w', newline='') as file:
+                print("this is the report obj path :----------- ", report_obj.path_date_time,device_name)
                 writer = csv.writer(file)
 
                 writer.writerow(['Time', 'RTT (ms)', 'Sent', 'Received', 'Dropped'])
@@ -615,7 +854,11 @@ class Ping(Realm):
                 for row in range(len(timestamps)):
                     writer.writerow([timestamps[row], rtts[row], self.result_json[device_name]['ping_stats']['sent'][row], self.result_json[device_name]
                                     ['ping_stats']['received'][row], self.result_json[device_name]['ping_stats']['dropped'][row]])
+                # print(f"-----------result_json {self.result_json}")
                 # writer.writerows([timestamps, rtts])
+                
+            self.generate_combined_csv(report_obj.path_date_time,timestamps,self.result_json)
+            
             sequence_numbers.sort()
             timestamps.sort()
 
@@ -670,6 +913,7 @@ class Ping(Realm):
             report_obj.build_graph()
 
     def store_csv(self, data=None):
+        print(f"ths is the  data dict 680 : {data}")
         if data is None:
             data = self.result_json
 
@@ -691,9 +935,11 @@ class Ping(Realm):
                 #     new_dict[((int(seq) -1) * interval + self.start_time).strftime("%d/%m/%Y %H:%M:%S")] = rtt
                 data[device]['webui_rtts'] = new_dict
         with open(self.ui_report_dir + '/runtime_ping_data.json', 'w') as f:
+            print(f"this is the file directory -- 701 : {self.ui_report_dir + '/runtime_ping_data.json'}")
             json.dump(data, f, indent=4)
         test_name = self.ui_report_dir.split("/")[-1]
         with open(self.ui_report_dir + '/../../Running_instances/{}_{}_running.json'.format(self.host, test_name), 'r') as f:
+            print(f"this is the file directory : {self.ui_report_dir + '/../../Running_instances/{}_{}_running.json'.format(self.host, test_name)}")
             run_status = json.load(f)
             if run_status["status"] != "Running":
                 logging.info('Test is stopped by the user')
@@ -1106,7 +1352,7 @@ class Ping(Realm):
         report.set_csv_filename(graph_png)
         report.move_csv_file()
         report.build_graph()
-
+        
         dataframe2 = pd.DataFrame({
             'Wireless Client': self.device_names,
             'MAC': self.device_mac,
@@ -1126,6 +1372,7 @@ class Ping(Realm):
         # graphs for above
 
         self.build_area_graphs(report_obj=report)
+        
 
         # check if there are remarks for any device. If there are remarks, build table else don't
         if self.remarks != []:
@@ -1142,6 +1389,16 @@ class Ping(Realm):
         # closing
         report.build_footer()
         report.write_html()
+        # shutil.move('overAllPing.csv', report_path_date_time)
+        
+        print(f" ----------------- this is the self.virtual value : {self.virtual}")
+        
+        if self.virtual or self.real:
+            
+            for device_name,device_data in self.result_json.items():
+                print(f"-----------inside virtual condition {'generic-'+device_name+'.csv'}")
+                shutil.move('generic-'+device_name+'.csv',report_path_date_time)
+
         report.write_pdf()
 
         if self.do_webUI:
@@ -1518,6 +1775,7 @@ connectivity problems.
                           action="store_true",
                           help='specify this flag to stop cleaning up generic cxs after the test')
 
+
     # webUI arguments
     webUI_args.add_argument('--do_webUI',
                             action='store_true',
@@ -1689,7 +1947,7 @@ connectivity problems.
 
     # creating virtual stations if --virtual flag is specified
     if args.virtual:
-
+        ping.virtual = args.virtual
         logging.info('Proceeding to create {} virtual stations on {}'.format(num_sta, radio))
         station_list = LFUtils.portNameSeries(
             prefix_='sta', start_id_=0, end_id_=num_sta - 1, padding_number_=100000, radio=radio)
@@ -1702,6 +1960,7 @@ connectivity problems.
     if args.real:
         Devices = RealDevice(manager_ip=mgr_ip, selected_bands=[])
         Devices.get_devices()
+        print(f"these are the devices: {Devices}")
         ping.Devices = Devices
         # If config is True, attempt to bring up all devices in the list and perform tests on those that become active
         if configure:
@@ -1800,7 +2059,7 @@ connectivity problems.
     # creating generic endpoints
     ping.create_generic_endp()
 
-    logging.info('{}'.format(*ping.generic_endps_profile.created_cx))
+    logging.info('this is the info after the create_generic_endpoint {}'.format(*ping.generic_endps_profile.created_cx))
 
     # run the test for the given duration
     logging.info('Running the ping plotter test for {} minutes'.format(duration))
@@ -1814,11 +2073,12 @@ connectivity problems.
     for ports in ports_data_dict:
         port, port_data = list(ports.keys())[0], list(ports.values())[0]
         ports_data[port] = port_data
+    # print(f"this is the ports data: {ports_data}")
 
     duration = duration * 60
 
     loop_timer = 0
-    logging.info(ping.result_json)
+    # logging.info(f"this is the result.json{ping.result_json}")
     rtts = {}
     rtts_list = []
     ping_stats = {}
@@ -1833,6 +2093,7 @@ connectivity problems.
         t_init = datetime.now()
         try:
             result_data = ping.get_results()
+            # print("result data: ", result_data)
             if isinstance(result_data, dict):
                 if 'UNKNOWN' in result_data['name']:
                     raise ValueError("There are no valid generic endpoints to run the test")
@@ -1842,21 +2103,37 @@ connectivity problems.
                 if len(keys) == 0:
                     raise ValueError("There are no valid generic endpoints to run the test")
         except ValueError as e:
-            logger.info(result_data)
+            # logger.info(f"this is the resilt_data ---------------- {result_data}")
             logger.error(e)
             exit(0)
         # logging.info(result_data)
         if args.virtual:
+            # name = f'generic-{station.split(".")[2]}'
+            # print(result_data)
+            # exit(1)
+            # logger.info(f"{station} - {result_data[0][name]['last results']}")
             ports_data_dict = ping.json_get('/ports/all/')['interfaces']
             ports_data = {}
+            # stats_pertime = {}
             for ports in ports_data_dict:
                 port, port_data = list(ports.keys())[0], list(ports.values())[0]
                 ports_data[port] = port_data
             if isinstance(result_data, dict):
+                # print("yes is instance")
                 for station in ping.sta_list:
+                    # print("inside station loop")
                     if station not in ping.real_sta_list:
+                        # print("inside unreal station loop")
                         current_device_data = ports_data[station]
                         if station.split('.')[2] in result_data['name']:
+                            if len(result_data['last results']) != 0:
+                                result = result_data['last results'].split('\n')
+                                if len(result) > 1:
+                                    last_result = result[-2]
+                                else:
+                                    last_result = result[-1]
+                            else:
+                                last_result = ""
                             ping.result_json[station] = {
                                 'command': result_data['command'],
                                 'sent': result_data['tx pkts'],
@@ -1871,12 +2148,37 @@ connectivity problems.
                                 'name': station,
                                 'os': 'Virtual',
                                 'remarks': [],
-                                'last_result': [result_data['last results'].split('\n')[-2] if len(result_data['last results']) != 0 else ""][0]
+                                'last_result': [last_result][0] #[result_data['last results'].split('\n')[-2] if len(result_data['last results']) != 0 else ""]
                             }
+                            # ping.realtimedata[station] = {
+                            #     'sent': result_data['tx pkts'],
+                            #     'recv': result_data['rx pkts'],
+                            #     'dropped': result_data['dropped'],
+                            #     'mac': current_device_data['mac'],
+                            #     'ip': current_device_data['ip'],
+                            #     'bssid': current_device_data['ap'],
+                            #     'ssid': current_device_data['ssid'],
+                            #     'channel': current_device_data['channel'],
+                            #     'mode': current_device_data['mode'],
+                            #     'name': station,
+                            #     'os': 'Virtual',
+                            #     'remarks': [],
+                            #     'last_result': [last_result][0] #[result_data['last results'].split('\n')[-2] if len(result_data['last results']) != 0 else ""]
+                            # }
+                            # logger.info(f"{ping.result_json[station]['last_result']}")
                             ping_stats[station]['sent'].append(result_data['tx pkts'])
                             ping_stats[station]['received'].append(result_data['rx pkts'])
                             ping_stats[station]['dropped'].append(result_data['dropped'])
+                            # tempararyData = {}
+                            # tempararyData['timestamp'] = str(t_init.strftime("%d/%m/%Y %H:%M:%S"))
+                            # tempararyData['station'] = station
+                            # tempararyData['sent'] = result_data['tx pkts']
+                            # tempararyData['recv'] = result_data['rx pkts']
+                            # tempararyData['dropped'] = result_data['dropped']
+                            # logger.info(f"this is the ping stats: , {station}-sent{result_data['tx pkts']}  {station}-recv{result_data['rx pkts']} {station}-dropped{result_data['dropped']}")
                             ping.result_json[station]['ping_stats'] = ping_stats[station]
+                            # ping.realtimedata[station]['ping_stats'] = ping_stats[station]
+
                             if len(result_data['last results']) != 0 and 'min/avg/max' in result_data['last results']:
                                 temp_last_results = result_data['last results'].split('\n')[0: len(result_data['last results']) - 1]
                                 drop_count = 0  # let dropped = 0 initially
@@ -1887,9 +2189,15 @@ connectivity problems.
                                         # fetching the first part of the last result e.g., 64 bytes from 192.168.1.61: icmp_seq=28 time=3.66 ms into t_result and the remaining part into t_fail
                                         t_result, t_fail = result.split('***')
                                     except BaseException:
+                                        # tempararyData['timestamp'] = str(t_init.strftime("%d/%m/%Y %H:%M:%S"))
+                                        # tempararyData['rtt'] = 0
                                         continue
                                     t_result = t_result.split()
+                                    # interval = timedelta(seconds=int(ping.interval))
+
                                     if 'icmp_seq=' not in result and 'time=' not in result:
+                                        # tempararyData['timestamp'] = str(t_init.strftime("%d/%m/%Y %H:%M:%S"))
+                                        # tempararyData['rtt'] = 0
                                         continue
                                     for t_data in t_result:
                                         if 'icmp_seq=' in t_data:
@@ -1898,7 +2206,8 @@ connectivity problems.
                                             rtt = float(t_data.strip('time='))
                                     rtts[station][seq_number] = rtt
                                     rtts_list.append(rtt)
-
+                                    # tempararyData['rtt'] = rtt
+                                    # tempararyData['timestamp'] = str(((seq_number-1) * interval + ping.start_time).strftime("%d/%m/%Y %H:%M:%S"))
                                     # finding dropped packets
                                     t_fail = t_fail.split()  # [' drop:', '0', '(0, 0.000)', 'rx:', '28', 'fail:', '0', 'bytes:', '1792', 'min/avg/max:', '2.160/3.422/5.190']
                                     t_drop_val = t_fail[1]  # t_drop_val = '0'
@@ -1908,7 +2217,9 @@ connectivity problems.
                                         drop_count = t_drop_val
                                         for drop_packet in range(1, current_drop_packets + 1):
                                             dropped_packets.append(seq_number - drop_packet)
-
+                            # else:
+                                # tempararyData['rtt'] = 0
+                                # tempararyData['timestamp'] = str(t_init.strftime("%d/%m/%Y %H:%M:%S"))
                             if rtts_list == []:
                                 rtts_list = [0]
                             min_rtt = str(min(rtts_list))
@@ -1917,6 +2228,9 @@ connectivity problems.
                             ping.result_json[station]['min_rtt'] = min_rtt
                             ping.result_json[station]['avg_rtt'] = avg_rtt
                             ping.result_json[station]['max_rtt'] = max_rtt
+                            # ping.realtimedata[station]['min_rtt'] = min_rtt
+                            # ping.realtimedata[station]['avg_rtt'] = avg_rtt
+                            # ping.realtimedata[station]['max_rtt'] = max_rtt
                             if list(rtts[station].keys()) != []:
                                 required_sequence_numbers = list(range(1, max(rtts[station].keys())))
                                 for seq in required_sequence_numbers:
@@ -1927,10 +2241,17 @@ connectivity problems.
                                             rtts[station][seq] = 0.11
                             else:
                                 ping.result_json[station]['rtts'] = {}
+                                # ping.realtimedata[station]['rtts'] = {}
                             ping.result_json[station]['rtts'] = rtts[station]
+                            # ping.realtimedata[station]['rtts'] = rtts[station]
                             ping.result_json[station]['remarks'] = ping.generate_remarks(ping.result_json[station])
-                            # ping.result_json[station]['dropped_packets'] = dropped_packets
+                            # ping.realtimedata[station]['remarks'] = ping.result_json[station]['remarks']
+                # ping.generate_real_time_csv()
+                            # ping.processEntry(tempararyData,stats_pertime)
 
+                            # ping.result_json[station]['dropped_packets'] = dropped_packets
+                        # else:
+                        #     print(f"this is not in the result data {station.split('.')[2]} and {result_data['name']}")
             else:
                 for station in ping.sta_list:
                     if station not in ping.real_sta_list:
@@ -1939,6 +2260,16 @@ connectivity problems.
                             ping_endp, ping_data = list(ping_device.keys())[
                                 0], list(ping_device.values())[0]
                             if station.split('.')[2] in ping_endp:
+                                # print(f"this is the last results : {str(ping_data['last results'])}")
+                                if len(ping_data['last results']) != 0:
+                                    result = ping_data['last results'].split('\n')
+                                    if len(result) > 1:
+                                        last_result = result[-2]
+                                    else:
+                                        last_result = result[-1]
+                                else:
+                                    last_result = ""
+
                                 ping.result_json[station] = {
                                     'command': ping_data['command'],
                                     'sent': ping_data['tx pkts'],
@@ -1953,12 +2284,38 @@ connectivity problems.
                                     'name': station,
                                     'os': 'Virtual',
                                     'remarks': [],
-                                    'last_result': [ping_data['last results'].split('\n')[-2] if len(ping_data['last results']) != 0 else ""][0]
+                                    'last_result': [last_result][0] #[ping_data['last results'].split('\n')[-2] if len(ping_data['last results']) != 0 else ""]
                                 }
+                                # ping.realtimedata[station] = {
+                                #     'command': ping_data['command'],
+                                #     'sent': ping_data['tx pkts'],
+                                #     'recv': ping_data['rx pkts'],
+                                #     'dropped': ping_data['dropped'],
+                                #     'mac': current_device_data['mac'],
+                                #     'ip': current_device_data['ip'],
+                                #     'bssid': current_device_data['ap'],
+                                #     'ssid': current_device_data['ssid'],
+                                #     'channel': current_device_data['channel'],
+                                #     'mode': current_device_data['mode'],
+                                #     'name': station,
+                                #     'os': 'Virtual',
+                                #     'remarks': [],
+                                #     'last_result': [last_result][0] #[ping_data['last results'].split('\n')[-1] if len(ping_data['last results']) != 0 else ""]
+                                # }
+                                # logger.info(f"{ping.result_json[station]['last_result']}")
+                                # tempararyData = {}
+                                # tempararyData['station'] = station
+                                # tempararyData['timestamp'] = str(ping.start_time.strftime("%d/%m/%Y %H:%M:%S"))
                                 ping_stats[station]['sent'].append(ping_data['tx pkts'])
                                 ping_stats[station]['received'].append(ping_data['rx pkts'])
                                 ping_stats[station]['dropped'].append(ping_data['dropped'])
+                                # tempararyData["sent"] = ping_data['tx pkts']
+                                # tempararyData["recv"] = ping_data['rx pkts']
+                                # tempararyData["dropped"] = ping_data['dropped']
+                                # logger.info(f"this is the ping stats: , {station}-sent {ping_data['tx pkts']}  {station}-recv {ping_data['rx pkts']} {station}-dropped {ping_data['dropped']}")
+
                                 ping.result_json[station]['ping_stats'] = ping_stats[station]
+                                # ping.realtimedata[station]['ping_stats'] = ping_stats[station]
                                 if len(ping_data['last results']) != 0 and 'min/avg/max' in ping_data['last results']:
                                     temp_last_results = ping_data['last results'].split('\n')[0: len(ping_data['last results']) - 1]
                                     drop_count = 0  # let dropped = 0 initially
@@ -1969,18 +2326,29 @@ connectivity problems.
                                             # fetching the first part of the last result e.g., 64 bytes from 192.168.1.61: icmp_seq=28 time=3.66 ms into t_result and the remaining part into t_fail
                                             t_result, t_fail = result.split('***')
                                         except BaseException:
+                                            # tempararyData['timestamp'] = str(t_init.strftime("%d/%m/%Y %H:%M:%S"))
+                                            # tempararyData['rtt'] = 0
                                             continue  # first line of ping result
                                         t_result = t_result.split()
                                         if 'icmp_seq=' not in result and 'time=' not in result:
+                                            # tempararyData['timestamp'] = str(t_init.strftime("%d/%m/%Y %H:%M:%S"))
+                                            # tempararyData['rtt'] = 0
                                             continue
+                                        interval = timedelta(seconds=int(ping.interval))
+                                        # print(f"this is the interval")
                                         for t_data in t_result:
                                             if 'icmp_seq=' in t_data:
                                                 seq_number = int(t_data.strip('icmp_seq='))
                                             if 'time=' in t_data:
                                                 rtt = float(t_data.strip('time='))
-                                        rtts[station][seq_number] = rtt
-                                        rtts_list.append(rtt)
-
+                                        try:
+                                            rtts[station][seq_number] = rtt 
+                                            rtts_list.append(rtt)
+                                        except Exception as e:
+                                            continue
+                                        # tempararyData['rtt'] = rtt
+                                        # tempararyData['timestamp'] = str(((seq_number-1) * interval + ping.start_time).strftime("%d/%m/%Y %H:%M:%S"))
+                                        # logger.info(stats_pertime)
                                         # finding dropped packets
                                         t_fail = t_fail.split()  # [' drop:', '0', '(0, 0.000)', 'rx:', '28', 'fail:', '0', 'bytes:', '1792', 'min/avg/max:', '2.160/3.422/5.190']
                                         t_drop_val = t_fail[1]  # t_drop_val = '0'
@@ -1990,7 +2358,9 @@ connectivity problems.
                                             drop_count = t_drop_val
                                             for drop_packet in range(1, current_drop_packets + 1):
                                                 dropped_packets.append(seq_number - drop_packet)
-
+                                # else:
+                                    # tempararyData['rtt'] = 0
+                                    # tempararyData['timestamp'] = str(t_init.strftime("%d/%m/%Y %H:%M:%S"))
                                 if rtts_list == []:
                                     rtts_list = [0]
                                 min_rtt = str(min(rtts_list))
@@ -1999,6 +2369,9 @@ connectivity problems.
                                 ping.result_json[station]['min_rtt'] = min_rtt
                                 ping.result_json[station]['avg_rtt'] = avg_rtt
                                 ping.result_json[station]['max_rtt'] = max_rtt
+                                # ping.realtimedata[station]['min_rtt'] = min_rtt
+                                # ping.realtimedata[station]['avg_rtt'] = avg_rtt
+                                # ping.realtimedata[station]['max_rtt'] = max_rtt
                                 if list(rtts[station].keys()) != []:
                                     required_sequence_numbers = list(range(1, max(rtts[station].keys())))
                                     for seq in required_sequence_numbers:
@@ -2010,7 +2383,14 @@ connectivity problems.
                                 else:
                                     ping.result_json[station]['rtts'] = {}
                                 ping.result_json[station]['rtts'] = rtts[station]
+                                # ping.realtimedata[station]['rtts'] = rtts[station]
                                 ping.result_json[station]['remarks'] = ping.generate_remarks(ping.result_json[station])
+                                # ping.realtimedata[station]['remarks'] = ping.result_json[station]['remarks']
+                                # logger.info(f"this is the temparary data: {tempararyData}")
+                                # ping.processEntry(tempararyData,stats_pertime)                  
+            ping.generate_real_time_csv()
+
+                                # ping.generate_real_time_csv(ping.result_json[station])            
                                 # ping.result_json[station]['dropped_packets'] = dropped_packets
 
         if args.real:
@@ -2019,7 +2399,7 @@ connectivity problems.
                     current_device_data = Devices.devices_data[station]
                     # logging.info(current_device_data)
                     if station in result_data['name']:
-                        # logging.info(result_data['last results'].split('\n'))
+                        logging.info(result_data['last results'].split('\n'))
                         if len(result_data['last results']) != 0:
                             result = result_data['last results'].split('\n')
                             if len(result) > 1:
@@ -2118,7 +2498,6 @@ connectivity problems.
                                         rtts[station][seq] = 0.11
                         ping.result_json[station]['rtts'] = rtts[station]
                         ping.result_json[station]['remarks'] = ping.generate_remarks(ping.result_json[station])
-
             else:
                 for station in ping.real_sta_list:
                     current_device_data = Devices.devices_data[station]
@@ -2138,6 +2517,7 @@ connectivity problems.
                             logger.info("Excluding {} from report as there is no valid generic endpoint creation during the test(UNKNOWN CX)".format(device_id))
                             continue
                         if station in ping_endp:
+                            # print("jjjjjjjjjjjj",ping_data['last results'])
                             if len(ping_data['last results']) != 0:
                                 result = ping_data['last results'].split('\n')
                                 if len(result) > 1:
@@ -2239,7 +2619,7 @@ connectivity problems.
                             ping.result_json[station]['rtts'] = rtts[station]
                             ping.result_json[station]['remarks'] = ping.generate_remarks(ping.result_json[station])
                             # ping.result_json[station]['dropped_packets'] = dropped_packets
-
+            ping.generate_real_time_csv()
         if ping.do_webUI:
             if not ping.store_csv():
                 logging.info('Aborted test from webUI')
@@ -2256,7 +2636,7 @@ connectivity problems.
     logging.info('Stopping the test')
     ping.stop_generic()
 
-    logging.info(ping.result_json)
+    # logging.info(ping.result_json)
 
     if ping.do_webUI:
         ping.copy_reports_to_home_dir()

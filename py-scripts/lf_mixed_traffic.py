@@ -73,21 +73,6 @@ EXAMPLE:
             --ping_test_duration 1m --qos_test_duration 30s --ftp_test_duration 30s --http_test_duration 30s --multicast_test_duration 30s
             --all_bands --pre_cleanup
 
-        # Command Line Interface to run the Test along with IOT without device list (Series)
-
-             python3 lf_mixed_traffic.py --mgr 192.168.207.78 --upstream_port eth1  --test_name mixedtraffic --mixed_traffic_loop 1
-             --real --use_default_config --pre_cleanup --target www.google.com --ping_interval 5 --ping_test_duration 1m --side_a_min 0
-             --side_b_min 10000000 --traffic_type lf_tcp --tos VO,VI,BE,BK --qos_test_duration 1m --tests 1 2 --iot_test --iot_ip 127.0.0.1
-             --iot_port 8000 --iot_iterations 1 --iot_delay 5 --iot_testname "mixedtraffic_iot"
-
-        # Command Line Interface to run the Test along with IOT with device list (Parallel)
-
-            python3 lf_mixed_traffic.py --mgr 192.168.207.78 --upstream_port eth1 --device_list 1.20 --test_name mixedtraffics --mixed_traffic_loop 1
-            --real --use_default_config --pre_cleanup --parallel --test_duration 1m --target www.google.com --ping_interval 5 --side_a_min 0
-            --side_b_min 10000000 --traffic_type lf_tcp --tos VO,VI,BE,BK --ftp_file_sizes 5MB --direction Download --tests 1 2 3
-            --iot_test --iot_ip 127.0.0.1 --iot_port 8000 --iot_iterations 1 --iot_delay 5 --iot_device_list "switch.smart_plug_1_socket_1"
-            --iot_testname "mixedtraffics_iot_parallel"
-
 SCRIPT_CLASSIFICATION:  Multiples Tests, Creation, Report Generation (Both individual & Overall)
 
 SCRIPT_CATEGORIES:  Performance, Functional
@@ -122,9 +107,6 @@ import datetime
 import pandas as pd
 from multiprocessing import Process, Pipe
 import shutil
-import threading
-from collections import OrderedDict
-
 
 # import traceback
 
@@ -134,7 +116,6 @@ if sys.version_info[0] != 3:
 
 sys.path.append(os.path.join(os.path.abspath(__file__ + "../../../")))
 realm = importlib.import_module("py-json.realm")
-LFCliBase = realm.LFCliBase
 Realm = realm.Realm
 lf_kpi_csv = importlib.import_module("py-scripts.lf_kpi_csv")
 lf_graph = importlib.import_module("py-scripts.lf_graph")
@@ -153,11 +134,6 @@ http_test = importlib.import_module("py-scripts.lf_webpage")
 multicast_test = importlib.import_module("py-scripts.test_l3")
 
 logger = logging.getLogger(__name__)
-
-iot_scripts_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../local/interop-webGUI/IoT/scripts/"))
-if os.path.exists(iot_scripts_path):
-    sys.path.insert(0, iot_scripts_path)
-    from test_automation import Automation  # noqa: E402
 
 
 class Mixed_Traffic(Realm):
@@ -987,7 +963,7 @@ class Mixed_Traffic(Realm):
                 self.qos_test_obj.avg_drop_b = []
                 time.sleep(10)
                 try:
-                    connections_download, connections_upload, drop_a_per, drop_b_per, self.qos_test_obj.connections_download_avg, self.qos_test_obj.connections_upload_avg, self.qos_test_obj.avg_drop_a, self.qos_test_obj.avg_drop_b = self.qos_test_obj.monitor()  # noqa: E501
+                    connections_download, connections_upload, drop_a_per, drop_b_per, self.qos_test_obj.connections_download_avg, self.qos_test_obj.connections_upload_avg, self.qos_test_obj.avg_drop_a, self.qos_test_obj.avg_drop_b = self.qos_test_obj.monitor2()  # noqa: E501
                 except Exception as e:
                     print(f"Failed at Monitoring the CX... {e}")
                 self.qos_test_obj.stop()
@@ -1044,7 +1020,9 @@ class Mixed_Traffic(Realm):
                                                                          port=self.port,
                                                                          number_template="0000",
                                                                          ap_name=ap_name,
-                                                                         num_stations=self.num_staions,
+                                                                         num_stations_2g=int(self.num_stations_2g),
+                                                                         num_stations_5g=int(self.num_stations_5g),
+                                                                         num_stations_6g=int(self.num_stations_6g),
                                                                          sta_list=self.station_list,
                                                                          create_sta=False,
                                                                          name_prefix="TOS-",
@@ -1081,7 +1059,7 @@ class Mixed_Traffic(Realm):
                 self.throughput_qos_obj.start(False, False)
                 time.sleep(10)
                 try:
-                    connections_download, connections_upload, drop_a_per, drop_b_per = self.throughput_qos_obj.monitor()
+                    connections_download, connections_upload, drop_a_per, drop_b_per = self.throughput_qos_obj.monitor2()
                 except Exception as e:
                     print(f"Failed at Monitoring the CX... {e}")
                 print("connections download", connections_download)
@@ -1176,6 +1154,7 @@ class Mixed_Traffic(Realm):
                 client_type = "Real"
             if self.virtual:
                 client_type = "Virtual"
+            indv_device_csv_list = []
             # For all combinations ftp_data of directions, file size and client counts, run the test
             for direction in directions:
                 for file_size in file_sizes:
@@ -1239,11 +1218,13 @@ class Mixed_Traffic(Realm):
                         self.ftp_test_obj.monitor_cx()
                     self.ftp_test_obj.start(False, False)
                     if self.dowebgui or self.real:
-                        self.ftp_test_obj.monitor_for_runtime_csv()
+                        self.ftp_test_obj.monitor_for_runtime_csv(self.band,direction,file_size,indv_device_csv_list)
                         self.ftp_test_obj.my_monitor_for_real_devices()
                     else:
-                        time.sleep(self.ftp_test_duration)
+                        # time.sleep(self.ftp_test_duration)
                         self.ftp_test_obj.my_monitor()
+                        self.ftp_test_obj.monitor_virtual(self.band,direction,file_size,indv_device_csv_list)
+
 
                     self.ftp_test_obj.stop()
                     logger.info("FTP Traffic stopped running")
@@ -1257,7 +1238,7 @@ class Mixed_Traffic(Realm):
             date = str(datetime.datetime.now()).split(",")[0].replace(" ", "-").split(".")[0]
             self.ftp_test_obj.generate_report(ftp_data, date, input_setup_info="", test_rig="", test_tag="",
                                               dut_hw_version="", dut_sw_version="", dut_model_num="", dut_serial_num="",
-                                              test_id="", bands=bands, csv_outfile=f"ftp_test{band}",
+                                              test_id="", bands=bands,directions=directions,file_sizes=file_sizes, csv_outfile=f"ftp_test{band}",
                                               local_lf_report_dir="", _results_dir_name=f'Ftp_Test_Report{band}',
                                               report_path=self.report_path)
             self.ftp_test_status = True
@@ -1354,7 +1335,7 @@ class Mixed_Traffic(Realm):
                 self.http_obj.file_create(ssh_port=22)
                 # self.http_obj.set_values()
                 # print(self.station_list)
-                # self.http_obj.station_list = [[self.station_list]]
+                self.http_obj.station_profile.station_names = self.station_list
                 self.cleanup.layer4_endp_clean()
                 self.station_profile.admin_up()
                 logger.info("Waiting until the all station ports are up. Max time out is 300 seconds.")
@@ -1391,10 +1372,10 @@ class Mixed_Traffic(Realm):
             if self.real:
                 self.http_obj.monitor_cx()
             self.http_obj.start()
-            if self.dowebgui or self.real:
-                self.http_obj.monitor_for_runtime_csv(self.http_test_duration)
-            else:
-                time.sleep(self.http_test_duration)
+            # if self.dowebgui or self.real:
+            # else:
+            #     time.sleep(self.http_test_duration)
+            self.http_obj.monitor_for_runtime_csv(self.http_test_duration)
             self.http_obj.stop()
             if self.real:
                 uc_avg_val = self.http_obj.data['uc_avg']
@@ -1744,11 +1725,9 @@ class Mixed_Traffic(Realm):
                     ]
                 )
 
-    def generate_all_report(self, iot_summary=None):
+    def generate_all_report(self):
         logger.info("To generate the Mixed Traffic report with all tests")
-        mode = "Parallel" if self.parallel else "Serial"
-        title = "Mixed Traffic Test Including IoT Devices" if iot_summary else "Mixed Traffic Test"
-        self.lf_report_mt.set_title(f"{title} ({mode})")
+        self.lf_report_mt.set_title("Mixed Traffic Test ({})".format(['Parallel' if self.parallel else 'Serial'][0]))
         self.lf_report_mt.build_banner()
         virtual_sta_count = len(self.station_list)
         windows_count = self.base_interop_profile.windows
@@ -1765,41 +1744,19 @@ class Mixed_Traffic(Realm):
             "Test Duration (HH:MM:SS)": self.time_formate}
         self.lf_report_mt.set_table_title("Test Setup Information")
         self.lf_report_mt.build_table_title()
-        if iot_summary:
-            test_setup_info = with_iot_params_in_table(test_setup_info, iot_summary)
         self.lf_report_mt.test_setup_table(test_setup_data=test_setup_info, value="Overall Setup Info For all Tests")
         # setting object for the mixed traffic
-        if iot_summary:
-            self.lf_report_mt.set_obj_html(
-                _obj_title="Objective",
-                _obj=(
-                    "The Candela Mixed Traffic Test Including IoT Devices is designed to evaluate an Access Point’s "
-                    "performance and stability when handling diverse traffic types across both Real clients "
-                    "(Android, Windows, Linux, iOS) and IoT devices (controlled via Home Assistant). "
-
-                    "For Real clients, the test runs multiple traffic types such as QoS, FTP, HTTP, Multicast, "
-                    "and Ping in series or parallel, measuring the AP’s ability to sustain performance and stability "
-                    "while ensuring all clients can run the selected traffic without degradation. "
-
-                    "For IoT clients, the test concurrently executes device-specific actions (e.g., camera streaming, "
-                    "switch toggling, lock/unlock) during mixed traffic operation and monitors success rate, latency, "
-                    "and failure rate. The goal is to validate that the AP can reliably manage heterogeneous traffic "
-                    "conditions for Real clients while maintaining consistent responsiveness and control of IoT devices."
-                )
-            )
-        else:
-            self.lf_report_mt.set_obj_html(
-                _obj_title="Objective",
-                _obj=(
-                    "The Candela mixed traffic test is designed to measure the access point performance and stability by "
-                    "running multiple traffic on real clients like Android, Linux, Windows, and IOS connected to the access "
-                    "point. This test allows the user to choose multiple types of traffic like client capacity test, web "
-                    "browser test, video streaming test, ping test. Along with the performance measurements are client "
-                    "connection times, Station 4-Way Handshake time, DHCP times, and more. The expected behavior is for the "
-                    "AP to be able to handle all types of traffic on the several stations (within the limitations of the AP "
-                    "specs) and make sure all clients can run all types of traffic."
-                )
-            )
+        self.lf_report_mt.set_obj_html(_obj_title="Objective",
+                                       _obj="The  Candela  mixed  traffic  test  is  designed  to  measure  the  access  "
+                                            "point  performance  andstability  by  running  multiple  traffic  on  real  "
+                                            "clients  like  Android,  Linux,  Windows,  and  IOSconnected  to  the  access  "
+                                            "point.  This  test  allows  the  user  to  choose  multiple  types  of  "
+                                            "traffic  likeclient   capacity   test,   web   browser   test,   video   "
+                                            "streaming   test   ping   test.   Along   with   theperformance measurements "
+                                            "are client connection times, Station 4-Way Handshake time, DHCPtimes, "
+                                            "and more. The expected behavior is for the AP to be able to handle all types "
+                                            "of traffic onthe several stations (within the limitations of the AP specs) "
+                                            "and Make sure all clients can run alltypes of traffic.")
         self.lf_report_mt.build_objective()
         self.lf_report_mt.set_table_title("Traffic Details")
         self.lf_report_mt.build_table_title()
@@ -2063,10 +2020,13 @@ class Mixed_Traffic(Realm):
                     self.lf_report_mt.set_csv_filename(graph_png)
                     self.lf_report_mt.move_csv_file()
                     self.lf_report_mt.build_graph()
-                    # Helpful for testhouse when both QoS and multicast are checked, to avoid generating redundant RSSI heatmaps.
-                    multicast_exists = "5" in self.tests and self.get_live_view
-                    qos_obj.generate_individual_graph(self.res, self.lf_report_mt, qos_obj.connections_download_avg, qos_obj.connections_upload_avg, qos_obj.avg_drop_a,
-                                                      qos_obj.avg_drop_b, self.total_floors, multicast_exists)
+                    if self.real:
+                        # Helpful for testhouse when both QoS and multicast are checked, to avoid generating redundant RSSI heatmaps.
+                        multicast_exists = "5" in self.tests and self.get_live_view
+                        qos_obj.generate_individual_graph(self.res, self.lf_report_mt, qos_obj.connections_download_avg, qos_obj.connections_upload_avg, qos_obj.avg_drop_a,
+                                                        qos_obj.avg_drop_b, self.total_floors, multicast_exists)
+                    else:
+                        qos_obj.generate_individual_graph(self.res, self.lf_report_mt)
             if "3" in self.tests and self.ftp_test_status:
                 # 3.FTP test reporting in mixed traffic
                 self.lf_report_mt.set_obj_html(_obj_title="3. File Transfer Protocol (FTP) Test", _obj="")
@@ -2393,8 +2353,6 @@ class Mixed_Traffic(Realm):
                         dataframe3 = pd.DataFrame(tos_dataframe_A)
                         self.lf_report_mt.set_table_dataframe(dataframe3)
                         self.lf_report_mt.build_table()
-            if iot_summary:
-                self.build_iot_report_section(self.lf_report_mt, iot_summary)
             overall_setup_info = {"contact": "support@candelatech.com"}
             self.lf_report_mt.test_setup_table(test_setup_data=overall_setup_info, value="Overall Info")
             if not self.get_live_view:
@@ -2417,230 +2375,6 @@ class Mixed_Traffic(Realm):
         if not os.path.exists(test_name_dir):
             os.makedirs(test_name_dir)
         shutil.copytree(curr_path, test_name_dir, dirs_exist_ok=True)
-
-    def build_iot_report_section(self, report, iot_summary):
-        """
-        Handles all IoT-related charts, tables, and increment-wise reports.
-        """
-        outdir = report.path_date_time
-        os.makedirs(outdir, exist_ok=True)
-
-        def copy_into_report(raw_path, new_name):
-            """Resolve and copy image into report dir."""
-            if not raw_path:
-                return None
-
-            abs_src = os.path.abspath(raw_path)
-            if not os.path.exists(abs_src):
-                # Search recursively under 'results' if absolute path missing
-                for root, _, files in os.walk(os.path.join(os.getcwd(), "results")):
-                    if os.path.basename(raw_path) in files:
-                        abs_src = os.path.join(root, os.path.basename(raw_path))
-                        break
-                else:
-                    return None
-
-            dst = os.path.join(outdir, new_name)
-            if os.path.abspath(abs_src) != os.path.abspath(dst):
-                shutil.copy2(abs_src, dst)
-            return new_name
-
-        # section header
-        report.set_custom_html('<div style="page-break-before: always;"></div>')
-        report.build_custom()
-        report.set_custom_html('<h2><u>IoT Results</u></h2>')
-        report.build_custom()
-
-        # Statistics
-        stats_png = copy_into_report(iot_summary.get("statistics_img"), "iot_statistics.png")
-        if stats_png:
-            report.build_chart_title("Test Statistics")
-            report.set_custom_html(f'<img src="{stats_png}" style="width:100%; height:auto;">')
-            report.build_custom()
-
-        # Request vs Latency
-        rvl_png = copy_into_report(iot_summary.get("req_vs_latency_img"), "iot_request_vs_latency.png")
-        if rvl_png:
-            report.build_chart_title("Request vs Average Latency")
-            report.set_custom_html(f'<img src="{rvl_png}" style="width:100%;">')
-            report.build_custom()
-
-        # Overall results table
-        ort = iot_summary.get("overall_result_table") or {}
-        if ort:
-            rows = [{
-                "Device": dev,
-                "Min Latency (ms)": stats.get("min_latency"),
-                "Avg Latency (ms)": stats.get("avg_latency"),
-                "Max Latency (ms)": stats.get("max_latency"),
-                "Total Iterations": stats.get("total_iterations"),
-                "Success Iters": stats.get("success_iterations"),
-                "Failed Iters": stats.get("failed_iterations"),
-                "No-Response Iters": stats.get("no_response_iterations"),
-            } for dev, stats in ort.items()]
-
-            df_overall = pd.DataFrame(rows).round(2)
-
-            report.set_custom_html('<div style="page-break-inside: avoid;">')
-            report.build_custom()
-            report.set_obj_html(_obj_title="Overall IoT Result Table", _obj=" ")
-            report.build_objective()
-            report.set_table_dataframe(df_overall)
-            report.build_table()
-            report.set_custom_html('</div>')
-            report.build_custom()
-
-        # Increment reports
-        inc = iot_summary.get("increment_reports") or {}
-        if inc:
-            report.set_custom_html('<h3>Reports by Increment Steps</h3>')
-            report.build_custom()
-
-            for step_name, rep in inc.items():
-
-                report.set_custom_html(f'<h4><u>{step_name.replace("_", " ")}</u></h4>')
-                report.build_custom()
-
-                # Latency graph
-                lat_png = copy_into_report(rep.get("latency_graph"), f"iot_{step_name}_latency.png")
-                if lat_png:
-                    report.build_chart_title("Average Latency")
-                    report.set_custom_html(f'<img src="{lat_png}" style="width:100%; height:auto;">')
-                    report.build_custom()
-
-                # Success count graph
-                res_png = copy_into_report(rep.get("result_graph"), f"iot_{step_name}_results.png")
-                if res_png:
-                    report.build_chart_title("Success Count")
-                    report.set_custom_html(f'<img src="{res_png}" style="width:100%; height:auto;">')
-                    report.build_custom()
-
-                # Tabular data for detailed iteration-level results
-                data_rows = rep.get("data") or []
-                if data_rows:
-                    df = pd.DataFrame(data_rows).rename(
-                        columns={"latency__ms": "Latency_ms", "latency_ms": "Latency_ms"}
-                    )
-                    if "Latency_ms" in df.columns:
-                        df["Latency_ms"] = pd.to_numeric(df["Latency_ms"], errors="coerce").round(3)
-                    if "Result" in df.columns:
-                        df["Result"] = df["Result"].map(lambda x: "Success" if bool(x) else "Failure")
-
-                    desired_cols = ["Iteration", "Device", "Current State", "Latency_ms", "Result"]
-                    df = df[[c for c in desired_cols if c in df.columns]]
-
-                    report.set_table_dataframe(df)
-                    report.build_table()
-
-                report.set_custom_html('<hr>')
-                report.build_custom()
-
-
-def with_iot_params_in_table(base: dict, iot_summary) -> dict:
-    """
-    Append IoT params into the existing Throughput Input Parameters table.
-    Adds: IoT Test name, IoT Iterations, IoT Delay (s), IoT Increment.
-    Accepts dict or JSON string.
-    """
-    try:
-        if not iot_summary:
-            return base
-        if isinstance(iot_summary, str):
-            try:
-                iot_summary = json.loads(iot_summary)
-            except Exception:
-                start = iot_summary.find("{")
-                end = iot_summary.rfind("}")
-                if start == -1 or end == -1 or end <= start:
-                    return base
-                try:
-                    iot_summary = json.loads(iot_summary[start:end + 1])
-                except Exception:
-                    return base
-
-        ti = (iot_summary.get("test_input_table") or {})
-        out = OrderedDict(base)
-        out["IoT Test name"] = ti.get("Testname", "")
-        out["Iot Device List"] = ti.get("Device List", "")
-        out["IoT Iterations"] = ti.get("Iterations", "")
-        out["IoT Delay (s)"] = ti.get("Delay (seconds)", "")
-        out["IoT Increment"] = ti.get("Increment Pattern", "")
-        return out
-    except Exception:
-        return base
-
-
-def trigger_iot(ip, port, iterations, delay, device_list, testname, increment):
-    """
-    Entry point to start the IoT test in a separate thread.
-    This function is called from the throughput test script when IoT testing
-    is enabled. It wraps the asynchronous `run_iot()`.
-    """
-    asyncio.run(run_iot(ip, port, iterations, delay, device_list, testname, increment))
-
-
-async def run_iot(ip: str = '127.0.0.1',
-                  port: str = '8000',
-                  iterations: int = 1,
-                  delay: int = 5,
-                  device_list: str = '',
-                  testname: str = '',
-                  increment: str = ''):
-    try:
-
-        if delay < 5:
-            logger.error('The minimum delay should be 5 seconds.')
-            exit(1)
-
-        if device_list != '':
-            device_list = device_list.split(',')
-        else:
-            device_list = None
-        # Parse and validate increment pattern if provided
-        if increment:
-            print("the increment is : ", increment)
-            try:
-                increment = list(map(int, increment.split(',')))
-                if any(i < 1 for i in increment):
-                    logger.error('Increment values must be positive integers')
-                    exit(1)
-            except ValueError:
-                logger.error('Invalid increment format. Please provide comma-separated integers (e.g., "1,3,5")')
-                exit(1)
-
-        testname = testname
-
-        # Ensure test name is unique (avoid overwriting previous results)
-        if testname in os.listdir('../../local/interop-webGUI/IoT/scripts/results/'):
-            logger.error('Test with same name already existing. Please give a different testname.')
-            exit(1)
-        automation = Automation(ip=ip,
-                                port=port,
-                                iterations=iterations,
-                                delay=delay,
-                                device_list=device_list,
-                                testname=testname,
-                                increment=increment)
-
-        # fetch the available iot devices
-        automation.devices = await automation.fetch_iot_devices()
-
-        # select the iot devices for testing
-        automation.select_iot_devices()
-
-        # run the iot test on selected devices
-        automation.run_test()
-
-        # generate the iot report
-        automation.generate_report()
-
-    except Exception as e:
-        logger.error(f"Iot Test failed: {str(e)}")
-        raise
-
-    await automation.session.close()
-
-    logger.info('Iot Test Completed.')
 
 
 def main():
@@ -2894,53 +2628,13 @@ INCLUDE_IN_README: False
                         action="store_true")
     optional.add_argument('--get_live_view', help="If true will heatmap will be generated from testhouse automation WebGui ", action='store_true')
     optional.add_argument('--total_floors', help="Total floors from testhouse automation WebGui ", default="0")
-    # IOT ARGS
-    parser.add_argument('--iot_test', help="If true will execute script for iot", action='store_true')
-    optional.add_argument('--iot_ip',
-                          default='127.0.0.1',
-                          help='IP of the server')
 
-    optional.add_argument('--iot_port',
-                          default='8000',
-                          help='Port of the server')
-    optional.add_argument('--iot_iterations',
-                          type=int,
-                          default=1,
-                          help='Iterations to run the test')
-
-    optional.add_argument('--iot_delay',
-                          type=int,
-                          default=5,
-                          help='Delay in seconds between iterations (min. 5 seconds)')
-
-    optional.add_argument('--iot_device_list',
-                          type=str,
-                          default='',
-                          help='Entity IDs of the devices to include in testing (comma separated)')
-
-    optional.add_argument('--iot_testname',
-                          type=str,
-                          default='',
-                          help='Testname for reporting')
-
-    optional.add_argument('--iot_increment',
-                          type=str,
-                          default='',
-                          help='Comma-separated list of device counts to incrementally test (e.g., "1,3,5")')
     args = parser.parse_args()
 
     # help summary
     if args.help_summary:
         print(help_summary)
         exit(0)
-    if args.iot_test:
-        iot_ip = args.iot_ip
-        iot_port = args.iot_port
-        iot_iterations = args.iot_iterations
-        iot_delay = args.iot_delay
-        iot_device_list = args.iot_device_list
-        iot_testname = args.iot_testname
-        iot_increment = args.iot_increment
 
     # set up logger
     logger_config = lf_logger_config.lf_logger_config()
@@ -3114,38 +2808,6 @@ INCLUDE_IN_README: False
                     exit(0)
                 else:
                     print("No Duplicates Devices Present.")
-    if args.iot_test:
-        if args.iot_iterations > 1:
-            thread = threading.Thread(target=trigger_iot, args=(iot_ip, iot_port, iot_iterations, iot_delay, iot_device_list, iot_testname, iot_increment))
-            thread.start()
-        else:
-            if args.parallel:
-                total_secs = int(LFCliBase.parse_time(args.test_duration).total_seconds())
-            else:
-                selected_tests = [int(t) for t in args.tests]
-                duration_map = {
-                    1: int(LFCliBase.parse_time(getattr(args, "ping_test_duration", "0s")).total_seconds()),
-                    2: int(LFCliBase.parse_time(getattr(args, "qos_test_duration", "0s")).total_seconds()),
-                    3: int(LFCliBase.parse_time(getattr(args, "ftp_test_duration", "0s")).total_seconds()),
-                    4: int(LFCliBase.parse_time(getattr(args, "http_test_duration", "0s")).total_seconds()),
-                    5: int(LFCliBase.parse_time(getattr(args, "multicast_test_duration", "0s")).total_seconds()),
-                }
-                total_secs = sum(duration_map.get(t, 0) for t in selected_tests)
-            iot_iterations = max(1, total_secs // args.iot_delay)
-            iot_thread = threading.Thread(
-                target=trigger_iot,
-                args=(
-                    args.iot_ip,
-                    args.iot_port,
-                    iot_iterations,
-                    args.iot_delay,
-                    args.iot_device_list,
-                    args.iot_testname,
-                    args.iot_increment
-                ),
-                daemon=True
-            )
-            iot_thread.start()
 
     # iteration-based logic
     for times in range(1, args.mixed_traffic_loop + 1):
@@ -3672,13 +3334,6 @@ INCLUDE_IN_README: False
                                                      side_a_min=args.side_a_min_bps, side_b_min=args.side_b_min_bps,
                                                      side_a_pdu=args.side_a_min_pdu, side_b_pdu=args.side_b_min_pdu,
                                                      all_bands=True)
-                iot_summary = None
-                if args.iot_test and args.iot_testname:
-                    base = os.path.join("results", args.iot_testname)
-                    p = os.path.join(base, "iot_summary.json")
-                    if os.path.exists(p):
-                        with open(p) as f:
-                            iot_summary = json.load(f)
                 # generating overall report
                 if mixed_obj.dowebgui:
                     try:
@@ -3690,7 +3345,7 @@ INCLUDE_IN_README: False
                     except Exception as e:
                         logging.info("Error while wrinting status file for webui", e)
 
-                mixed_obj.generate_all_report(iot_summary=iot_summary)
+                mixed_obj.generate_all_report()
                 if mixed_obj.dowebgui:
                     # copying to home directory i.e home/user_name
                     mixed_obj.copy_reports_to_home_dir()

@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang='en'>
+    <head>
+        <meta charset='UTF-8'>
+        <meta name='viewport' content='width=device-width, initial-scale=1' />
+        <style>
+        body { margin: 0; padding: 0; }
+        </style>
+        <link rel='stylesheet' href='report.css' />
+        <link rel='stylesheet' href='custom.css' />
+        <title>Mixed Traffic Test (Serial)</title>
+    </head>
+    <body>
+        <div id='BannerBack'>
+            <div id='Banner'>
+                <img id='BannerLogo' align='right' src="CandelaLogo2-90dpi-200x90-trans.png" border='0'/>
+                <div class='HeaderStyle'>
+                    <h1 class='TitleFontPrint' style='color:darkgreen;'>Mixed Traffic Test (Serial)</h1>
+                    <h4 class='TitleFontPrintSub' style='color:darkgreen;'>2026-02-24-14-53-20</h4>
+                </div>
+            </div>
+        </div>
+                 
+                    <!-- Table Title-->
+                    <h3 align='left'>Test Setup Information</h3>
+                    
+                            <!-- Test Setup Information -->
+                            <table width='700px' border='1' cellpadding='2' cellspacing='0' style='border-top-color: gray; border-top-style: solid; border-top-width: 1px;                              border-right-color: gray; border-right-style: solid; border-right-width: 1px; border-bottom-color: gray; border-bottom-style: solid;                              border-bottom-width: 1px; border-left-color: gray; border-left-style: solid; border-left-width: 1px'>
+
+                                <tr>
+                                  <td>Overall Setup Info For all Tests</td>
+                                  <td>
+                                    <table width='100%' border='0' cellpadding='2' cellspacing='0' style='border-top-color: gray; border-top-style: solid; border-top-width: 1px;                                      border-right-color: gray; border-right-style: solid; border-right-width: 1px; border-bottom-color: gray; border-bottom-style: solid;                                      border-bottom-width: 1px; border-left-color: gray; border-left-style: solid; border-left-width: 1px'>
+                                      <tr><td>DUT Model</td><td colspan='3'>Test_DUT</td></tr><tr><td>DUT Firmware</td><td colspan='3'>NA</td></tr><tr><td>SSID</td><td colspan='3'>NETGEAR_2G_Open</td></tr><tr><td>Security</td><td colspan='3'>open</td></tr><tr><td>No of Devices</td><td colspan='3'>5 (Virtual Clients: 5, Windows: 0, Linux: 0, Mac: 0, Android: 0 ,iOS: 0)</td></tr><tr><td>Test Duration (HH:MM:SS)</td><td colspan='3'>00:13:00</td></tr>
+                                    </table>
+                                  </td>
+                                </tr>
+                            </table>
+
+                            <br>
+                            
+            <!-- Test Objective -->
+            <h3 align='left'>Objective</h3>
+            <p align='left' width='900'>The  Candela  mixed  traffic  test  is  designed  to  measure  the  access  point  performance  andstability  by  running  multiple  traffic  on  real  clients  like  Android,  Linux,  Windows,  and  IOSconnected  to  the  access  point.  This  test  allows  the  user  to  choose  multiple  types  of  traffic  likeclient   capacity   test,   web   browser   test,   video   streaming   test   ping   test.   Along   with   theperformance measurements are client connection times, Station 4-Way Handshake time, DHCPtimes, and more. The expected behavior is for the AP to be able to handle all types of traffic onthe several stations (within the limitations of the AP specs) and Make sure all clients can run alltypes of traffic.</p>
+            
+                    <!-- Table Title-->
+                    <h3 align='left'>Traffic Details</h3>
+                    <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: center;">
+      <th>Sno</th>
+      <th>Test Cases</th>
+      <th>Test Duration</th>
+      <th>Test Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>Ping Test</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>Quality Of Service(QOS) Test ['VO']</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>FTP Test</td>
+      <td>1.0 minute</td>
+      <td>Executed</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>HTTP Test</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>Multicast Test</td>
+      <td></td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+            <!-- Test Objective -->
+            <h3 align='left'>3. File Transfer Protocol (FTP) Test</h3>
+            <p align='left' width='900'></p>
+            
+                    <!-- Table Title-->
+                    <h3 align='left'>Test Configuration</h3>
+                    
+                            <!-- Test Setup Information -->
+                            <table width='700px' border='1' cellpadding='2' cellspacing='0' style='border-top-color: gray; border-top-style: solid; border-top-width: 1px;                              border-right-color: gray; border-right-style: solid; border-right-width: 1px; border-bottom-color: gray; border-bottom-style: solid;                              border-bottom-width: 1px; border-left-color: gray; border-left-style: solid; border-left-width: 1px'>
+
+                                <tr>
+                                  <td>Test Setup Information</td>
+                                  <td>
+                                    <table width='100%' border='0' cellpadding='2' cellspacing='0' style='border-top-color: gray; border-top-style: solid; border-top-width: 1px;                                      border-right-color: gray; border-right-style: solid; border-right-width: 1px; border-bottom-color: gray; border-bottom-style: solid;                                      border-bottom-width: 1px; border-left-color: gray; border-left-style: solid; border-left-width: 1px'>
+                                      <tr><td>Traffic Direction</td><td colspan='3'>Download</td></tr><tr><td>File Size</td><td colspan='3'>1MB</td></tr><tr><td>File Location</td><td colspan='3'>/home/lanforge</td></tr>
+                                    </table>
+                                  </td>
+                                </tr>
+                            </table>
+
+                            <br>
+                            
+            <!-- Test Objective -->
+            <h3 align='left'>No.of times file Download</h3>
+            <p align='left' width='900'>The below graph represents number of times a file Download for each client (WiFi) traffic.  X-axis shows “No of times file Download” and Y-axis shows “Client names“.</p>
+            
+              <img align='center' style='padding:15px;margin:5px 5px 2em 5px;width:1000px;' src='ftp_total-url.png' border='1' />
+            
+            <!-- Test Objective -->
+            <h3 align='left'>Average time taken to Download file </h3>
+            <p align='left' width='900'>The below graph represents average time taken to Download for each client  (WiFi) traffic.  X-axis shows “Average time taken to Download a file ” and Y-axis shows “Client names“.</p>
+            
+              <img align='center' style='padding:15px;margin:5px 5px 2em 5px;width:1000px;' src='ftp_ucg-avg.png' border='1' />
+            
+                    <!-- Table Title-->
+                    <h3 align='left'>Overall Results</h3>
+                    <table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: center;">
+      <th>Clients</th>
+      <th>MAC</th>
+      <th>Channel</th>
+      <th>SSID</th>
+      <th>Mode</th>
+      <th>No of times File downloaded</th>
+      <th>Time Taken to Download file (ms)</th>
+      <th>Bytes-rd (Mega Bytes)</th>
+      <th>RX RATE (Mbps)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1.1.sta2000</td>
+      <td>04:f0:21:89:c1:f4</td>
+      <td>11</td>
+      <td>NETGEAR_2G_Open</td>
+      <td>802.11bgn-AC 20 2x2</td>
+      <td>56</td>
+      <td>209.142</td>
+      <td>56.0</td>
+      <td>7.7529</td>
+    </tr>
+    <tr>
+      <td>1.1.sta2001</td>
+      <td>04:f0:21:89:4d:f4</td>
+      <td>11</td>
+      <td>NETGEAR_2G_Open</td>
+      <td>802.11bgn-AC 20 2x2</td>
+      <td>57</td>
+      <td>312.578</td>
+      <td>57.0</td>
+      <td>7.7362</td>
+    </tr>
+    <tr>
+      <td>1.1.sta2002</td>
+      <td>04:f0:21:89:fd:f4</td>
+      <td>11</td>
+      <td>NETGEAR_2G_Open</td>
+      <td>802.11bgn-AC 20 2x2</td>
+      <td>53</td>
+      <td>334.509</td>
+      <td>53.0</td>
+      <td>7.9054</td>
+    </tr>
+    <tr>
+      <td>1.1.sta2003</td>
+      <td>04:f0:21:89:93:f4</td>
+      <td>11</td>
+      <td>NETGEAR_2G_Open</td>
+      <td>802.11bgn-AC 20 2x2</td>
+      <td>54</td>
+      <td>210.425</td>
+      <td>54.0</td>
+      <td>7.8335</td>
+    </tr>
+    <tr>
+      <td>1.1.sta2004</td>
+      <td>04:f0:21:89:df:f4</td>
+      <td>11</td>
+      <td>NETGEAR_2G_Open</td>
+      <td>802.11bgn-AC 20 2x2</td>
+      <td>54</td>
+      <td>214.666</td>
+      <td>54.0</td>
+      <td>7.8894</td>
+    </tr>
+  </tbody>
+</table>
+                            <!-- Test Setup Information -->
+                            <table width='700px' border='1' cellpadding='2' cellspacing='0' style='border-top-color: gray; border-top-style: solid; border-top-width: 1px;                              border-right-color: gray; border-right-style: solid; border-right-width: 1px; border-bottom-color: gray; border-bottom-style: solid;                              border-bottom-width: 1px; border-left-color: gray; border-left-style: solid; border-left-width: 1px'>
+
+                                <tr>
+                                  <td>Overall Info</td>
+                                  <td>
+                                    <table width='100%' border='0' cellpadding='2' cellspacing='0' style='border-top-color: gray; border-top-style: solid; border-top-width: 1px;                                      border-right-color: gray; border-right-style: solid; border-right-width: 1px; border-bottom-color: gray; border-bottom-style: solid;                                      border-bottom-width: 1px; border-left-color: gray; border-left-style: solid; border-left-width: 1px'>
+                                      <tr><td>contact</td><td colspan='3'>support@candelatech.com</td></tr>
+                                    </table>
+                                  </td>
+                                </tr>
+                            </table>
+
+                            <br>
+                            
+    <footer class='FooterStyle'>
+        <a href="https://www.candelatech.com/"><img
+            id='BannerLogoFooter' align='right' src="candela_swirl_small-72h.png" border='0'/></a>
+        <p>Generated by Candela Technologies LANforge network testing tool</p>
+        <p><a href="https://www.candelatech.com">www.candelatech.com</a><p>
+    </footer>
+        

@@ -692,6 +692,9 @@ class Mixed_Traffic(Realm):
                                                 password=password, lanforge_password="lanforge", target=self.target,
                                                 interval=self.interval, sta_list=[], virtual=self.virtual, real=self.real,
                                                 duration=ping_test_duration, result_dir=self.result_dir)
+            self.ping_test_obj.real = self.real
+            self.ping_test_obj.virtual = self.virtual
+            self.ping_test_obj.configure = self.configure
             if not self.ping_test_obj.check_tab_exists():
                 print('Generic Tab is not available for Ping Test.\nAborting the test.')
                 exit(0)
@@ -707,8 +710,14 @@ class Mixed_Traffic(Realm):
                     exit(0)
                 self.ping_test_obj.cleanup()
                 self.ping_test_obj.sta_list = self.user_query[0]
-            elif self.virtual:
-                self.ping_test_obj.sta_list = self.station_list
+            if self.virtual:
+                if self.real:
+                    copied_station_list = self.station_list.copy()
+                    copied_station_list.extend(self.ping_test_obj.sta_list)
+                    self.ping_test_obj.sta_list = copied_station_list
+                else:
+                    self.ping_test_obj.sta_list = self.station_list
+                
                 print('Virtual Stations: {}'.format(self.station_list).replace('[', '').replace(']', '').replace('\'', ''))
                 # #cleanup
                 for station in self.station_list:
@@ -721,11 +730,14 @@ class Mixed_Traffic(Realm):
                 self.ping_test_obj.generic_endps_profile.created_cx = []
                 self.ping_test_obj.generic_endps_profile.created_endp = []
             # creating generic endpoints
+            logger.info(f"this is the station list for ping test: {self.ping_test_obj.sta_list}")
             self.ping_test_obj.create_generic_endp()
             logger.info("Generic Cross-Connection List: {}".format(self.ping_test_obj.generic_endps_profile.created_cx))
             logger.info('Starting Running the Ping Test for {} minutes'.format(ping_test_duration))
             # start generate endpoint
-            time.sleep(20)
+            # time.sleep(20)
+            from datetime import datetime, timedelta
+            self.ping_test_obj.start_time = datetime.now()
             self.ping_test_obj.start_generic()
             ports_data_dict = self.ping_test_obj.json_get('/ports/all/')['interfaces']
             ports_data = {}
@@ -783,117 +795,95 @@ class Mixed_Traffic(Realm):
                         logging.info("execption while reading running json in ping")
                     time.sleep(3)
             else:
-                time.sleep(ping_test_duration * 60)
+                duration = int(ping_test_duration*60)
+                self.ping_test_obj.result_json = {}
+                self.ping_test_obj.duration = duration
+                print(duration)
+                loop_timer = 0
+                self.ping_test_obj.rtts = {}
+                self.ping_test_obj.rtts_list = []
+                self.ping_test_obj.ping_stats = {}
+                for station in self.ping_test_obj.sta_list:
+                    self.ping_test_obj.rtts[station] = {}
+                    self.ping_test_obj.ping_stats[station] = {
+                        'sent' : [],
+                        'received' : [],
+                        'dropped' : []
+                    }
+                while (loop_timer <= duration):
+                    t_init = datetime.now()
+                    try:
+                        result_data = self.ping_test_obj.get_results()
+                        # print(result_data)
+                        if isinstance(result_data, dict):
+                            if 'UNKNOWN' in result_data['name']:
+                                raise ValueError("There are no valid generic endpoints to run the test")
+                        else:
+                            keys = [list(d.keys())[0] for d in result_data]
+                            keys = [key for key in keys if 'UNKNOWN' not in key]
+                            if len(keys) == 0:
+                                raise ValueError("There are no valid generic endpoints to run the test")
+                    except ValueError as e:
+                        logger.info(result_data)
+                        logger.error(e)
+                        exit(0)
+
+                    if self.virtual:
+                        ports_data_dict = self.ping_test_obj.json_get('/ports/all/')['interfaces']
+                        ports_data = {}
+                        for ports in ports_data_dict:
+                            port, port_data = list(ports.keys())[0], list(ports.values())[0]
+                            ports_data[port] = port_data
+                        self.ping_test_obj.monitor_virtual(result_data,ports_data,self.ping_test_obj.ping_stats,self.ping_test_obj.rtts,self.ping_test_obj.rtts_list)
+                        if self.real:
+                            self.ping_test_obj.monitor_real(result_data,self.ping_test_obj.Devices,self.ping_test_obj.ping_stats,self.ping_test_obj.rtts,self.ping_test_obj.rtts_list)
+                    else:
+                        self.ping_test_obj.monitor_real(result_data,self.ping_test_obj.Devices,self.ping_test_obj.ping_stats,self.ping_test_obj.rtts,self.ping_test_obj.rtts_list)
+
+                    self.ping_test_obj.generate_real_time_csv()
+                    time.sleep(1)
+                    t_end = datetime.now()
+                    loop_timer += abs(t_init - t_end).total_seconds()
             logger.info('Stopping the PING Test...')
             self.ping_test_obj.stop_generic()
-            # getting result dict
-            result_data = self.ping_test_obj.get_results()
-            result_json = {}
-            if self.real:
-                if isinstance(result_data, dict):
-                    for station in self.ping_test_obj.sta_list:
-                        current_device_data = self.base_interop_profile.devices_data[station]
-                        if station in result_data['name']:
-                            result_json[station] = {
-                                'command': result_data['command'],
-                                'sent': result_data['tx pkts'],
-                                'recv': result_data['rx pkts'],
-                                'dropped': result_data['dropped'],
-                                'min_rtt': [result_data['last results'].split('\n')[-2].split()[-1].split(':')[-1].split('/')[0] if len(result_data['last results']) != 0 and 'min/avg/max' in result_data['last results'].split('\n')[-2] else '0'][0],  # noqa: E501
-                                'avg_rtt': [result_data['last results'].split('\n')[-2].split()[-1].split(':')[-1].split('/')[1] if len(result_data['last results']) != 0 and 'min/avg/max' in result_data['last results'].split('\n')[-2] else '0'][0],  # noqa: E501
-                                'max_rtt': [result_data['last results'].split('\n')[-2].split()[-1].split(':')[-1].split('/')[2] if len(result_data['last results']) != 0 and 'min/avg/max' in result_data['last results'].split('\n')[-2] else '0'][0],  # noqa: E501
-                                'mac': current_device_data['mac'],
-                                'channel': current_device_data['channel'],
-                                'ssid': current_device_data['ssid'],
-                                'mode': current_device_data['mode'],
-                                'name': [current_device_data['user'] if current_device_data['user'] != '' else current_device_data['hostname']][0],
-                                'os': ['Windows' if 'Win' in current_device_data['hw version'] else 'Linux' if 'Linux' in current_device_data['hw version'] else 'Mac' if 'Apple' in current_device_data['hw version'] else 'Android'][0],  # noqa: E501
-                                'remarks': [],
-                                'last_result': [result_data['last results'].split('\n')[-2] if len(result_data['last results']) != 0 else ""][0]}
-                            result_json[station]['remarks'] = self.ping_test_obj.generate_remarks(result_json[station])
+
+            timestamp = (timedelta(minutes=int(self.ping_test_obj.duration)) + self.ping_test_obj.start_time).strftime("%d/%m/%Y %H:%M:%S")
+            csv_dir = "csv_reports"
+
+            import csv
+        
+            for device_name,device_data in self.ping_test_obj.result_json.items():
+                if device_data['os'] == "Virtual":
+                    csv_file = os.path.join(csv_dir, f"sta_{device_name.replace('.', '_')}.csv")
                 else:
-                    for station in self.ping_test_obj.sta_list:
-                        current_device_data = self.base_interop_profile.devices_data[station]
-                        for ping_device in result_data:
-                            ping_endp, ping_data = list(ping_device.keys())[0], list(ping_device.values())[0]
-                            if station in ping_endp:
-                                result_json[station] = {
-                                    'command': ping_data['command'],
-                                    'sent': ping_data['tx pkts'],
-                                    'recv': ping_data['rx pkts'],
-                                    'dropped': ping_data['dropped'],
-                                    'min_rtt': [(ping_data['last results'].split('\n')[-2].split()[-1].split(':')[-1].split('/')[0]).replace(',', '') if len(ping_data['last results']) != 0 and 'min/avg/max' in ping_data['last results'].split('\n')[-2] else '0'][0],  # noqa: E501
-                                    'avg_rtt': [(ping_data['last results'].split('\n')[-2].split()[-1].split(':')[-1].split('/')[1]).replace(',', '') if len(ping_data['last results']) != 0 and 'min/avg/max' in ping_data['last results'].split('\n')[-2] else '0'][0],  # noqa: E501
-                                    'max_rtt': [(ping_data['last results'].split('\n')[-2].split()[-1].split(':')[-1].split('/')[2]).replace(',', '') if len(ping_data['last results']) != 0 and 'min/avg/max' in ping_data['last results'].split('\n')[-2] else '0'][0],  # noqa: E501
-                                    'mac': current_device_data['mac'],
-                                    'channel': current_device_data['channel'],
-                                    'ssid': current_device_data['ssid'],
-                                    'mode': current_device_data['mode'],
-                                    'name': [current_device_data['user'] if current_device_data['user'] != '' else current_device_data['hostname']][0],
-                                    'os': ['Windows' if 'Win' in current_device_data['hw version'] else 'Linux' if 'Linux' in current_device_data['hw version'] else 'Mac' if 'Apple' in current_device_data['hw version'] else 'Android'][0],  # noqa: E501
-                                    'remarks': [],
-                                    'last_result': [ping_data['last results'].split('\n')[-2] if len(ping_data['last results']) != 0 else ""][0]}
-                                result_json[station]['remarks'] = self.ping_test_obj.generate_remarks(result_json[station])
-            if self.virtual:
-                ports_data_dict = self.ping_test_obj.json_get('/ports/all/')['interfaces']
-                ports_data = {}
-                for ports in ports_data_dict:
-                    port, port_data = list(ports.keys())[0], list(ports.values())[0]
-                    ports_data[port] = port_data
-                if isinstance(result_data, dict):
-                    for station in self.ping_test_obj.sta_list:
-                        if station not in self.ping_test_obj.real_sta_list:
-                            current_device_data = ports_data[station]
-                            if station.split('.')[2] in result_data['name']:
-                                result_json[station] = {
-                                    'command': result_data['command'],
-                                    'sent': result_data['tx pkts'],
-                                    'recv': result_data['rx pkts'],
-                                    'dropped': result_data['dropped'],
-                                    'min_rtt': [result_data['last results'].split('\n')[-2].split()[-1].split('/')[0] if len(result_data['last results']) != 0 and 'min/avg/max' in result_data['last results'].split('\n')[-2] else '0'][0],  # noqa: E501
-                                    'avg_rtt': [result_data['last results'].split('\n')[-2].split()[-1].split('/')[1] if len(result_data['last results']) != 0 and 'min/avg/max' in result_data['last results'].split('\n')[-2] else '0'][0],  # noqa: E501
-                                    'max_rtt': [result_data['last results'].split('\n')[-2].split()[-1].split('/')[2] if len(result_data['last results']) != 0 and 'min/avg/max' in result_data['last results'].split('\n')[-2] else '0'][0],  # noqa: E501
-                                    'mac': current_device_data['mac'],
-                                    'channel': current_device_data['channel'],
-                                    'ssid': current_device_data['ssid'],
-                                    'mode': current_device_data['mode'],
-                                    'name': station,
-                                    'os': 'Virtual',
-                                    'remarks': [],
-                                    'last_result': [result_data['last results'].split('\n')[-2] if len(result_data['last results']) != 0 else ""][0]}
-                                result_json[station]['remarks'] = self.ping_test_obj.generate_remarks(result_json[station])
-                else:
-                    for station in self.ping_test_obj.sta_list:
-                        if station not in self.ping_test_obj.real_sta_list:
-                            current_device_data = ports_data[station]
-                            for ping_device in result_data:
-                                ping_endp, ping_data = list(ping_device.keys())[0], list(ping_device.values())[0]
-                                if station.split('.')[2] in ping_endp:
-                                    result_json[station] = {
-                                        'command': ping_data['command'],
-                                        'sent': ping_data['tx pkts'],
-                                        'recv': ping_data['rx pkts'],
-                                        'dropped': ping_data['dropped'],
-                                        'min_rtt': [ping_data['last results'].split('\n')[-2].split()[-1].split('/')[0] if len(ping_data['last results']) != 0 and 'min/avg/max' in ping_data['last results'].split('\n')[-2] else '0'][0],  # noqa: E501
-                                        'avg_rtt': [ping_data['last results'].split('\n')[-2].split()[-1].split('/')[1] if len(ping_data['last results']) != 0 and 'min/avg/max' in ping_data['last results'].split('\n')[-2] else '0'][0],  # noqa: E501
-                                        'max_rtt': [ping_data['last results'].split('\n')[-2].split()[-1].split('/')[2] if len(ping_data['last results']) != 0 and 'min/avg/max' in ping_data['last results'].split('\n')[-2] else '0'][0],  # noqa: E501
-                                        'mac': current_device_data['mac'],
-                                        'channel': current_device_data['channel'],
-                                        'ssid': current_device_data['ssid'],
-                                        'mode': current_device_data['mode'],
-                                        'name': station,
-                                        'os': 'Virtual',
-                                        'remarks': [],
-                                        'last_result': [ping_data['last results'].split('\n')[-2] if len(ping_data['last results']) != 0 else ""][0]}
-                                    result_json[station]['remarks'] = self.ping_test_obj.generate_remarks(result_json[station])
+                    csv_file = os.path.join(csv_dir, f"device_{device_name.replace('.', '_')}.csv")
+                sent = device_data['sent']
+                received = device_data['recv']
+                dropped = device_data['dropped']
+                status = "Stopped"
+                siz = len(device_data['rtts'])
+                rtt = 0
+                try:
+                    rtt = device_data['rtts'][siz]
+                except KeyError as e:
+                    logger.info(f"rtts of the device {device_name} not found")
+                if "dBm" in device_data['rssi']:
+                    device_data['rssi'] = device_data['rssi'].split(" ")[0]
+
+                with open(csv_file, 'a', newline='') as file:
+                    writer = csv.writer(file)
+                    writer.writerow([timestamp,rtt,sent,received,dropped,status,device_data['rssi'],device_data['channel'],device_data['mode'],device_data['ssid'],device_data['bssid'],device_data['mac']])
+
+            
+              
             if self.dowebgui:
                 temp_json = []
-                for station in result_json:
-                    logging.debug('{} {}'.format(station, result_json[station]))
+                for station in self.ping_test_obj.result_json:
+                    logging.debug('{} {}'.format(station, self.ping_test_obj.result_json[station]))
                     temp_json.append({'device': station,
-                                      'sent': result_json[station]['sent'],
-                                      'recv': result_json[station]['recv'],
-                                      'dropped': result_json[station]['dropped'],
+                                      'sent': self.ping_test_obj.result_json[station]['sent'],
+                                      'recv': self.ping_test_obj.result_json[station]['recv'],
+                                      'dropped': self.ping_test_obj.result_json[station]['dropped'],
                                       'status': "Stopped",
                                       'start_time': start_time.strftime("%d/%m %I:%M:%S %p"),
                                       'end_time': end_time.strftime("%d/%m %I:%M:%S %p"),
@@ -901,12 +891,12 @@ class Mixed_Traffic(Realm):
                 df1 = pd.DataFrame(temp_json)
                 df1.to_csv('{}/ping_datavalues.csv'.format(self.result_dir), index=False)
             else:
-                logger.info("Final Result Json For Ping Test: {}".format(result_json))
+                logger.info("Final Result Json For Ping Test: {}".format(self.ping_test_obj.result_json))
             if all_bands:
                 band = ''
             else:
                 band = '_' + self.band
-            self.ping_test_obj.generate_report(result_json=result_json, result_dir=f'Ping_Test_Report{band}',
+            self.ping_test_obj.generate_report(result_json=self.ping_test_obj.result_json, result_dir=f'Ping_Test_Report{band}',
                                                report_path=self.report_path)
             self.ping_test_status = True
             if (conn):
@@ -1150,12 +1140,29 @@ class Mixed_Traffic(Realm):
             interation_num = 0
             ftp_data = {}
             client_type = ""
-            if self.real:
-                client_type = "Real"
-            if self.virtual:
-                client_type = "Virtual"
+            if self.real and self.virtual:
+                client_type = "both"
+            elif self.real:
+                client_type = "real"    
+            else:
+                client_type = "virtual"
+            
             indv_device_csv_list = []
             # For all combinations ftp_data of directions, file size and client counts, run the test
+            
+
+            if self.band == '2.4G':
+                ssid = self.ssid_2g
+                password = self.passwd_2g
+                security = self.security_2g
+            elif self.band == '5G':
+                ssid = self.ssid_5g
+                password = self.passwd_5g
+                security = self.security_5g
+            else:
+                ssid = self.ssid_6g
+                password = self.passwd_6g
+                security = self.security_6g
             for direction in directions:
                 for file_size in file_sizes:
                     self.ftp_test_obj = ftp_test.FtpTest(lfclient_host=self.host,
@@ -1180,9 +1187,45 @@ class Mixed_Traffic(Realm):
                                                          result_dir=self.result_dir,
                                                          test_name=self.test_name)
                     interation_num = interation_num + 1
+                    if self.real and self.virtual:
+                        self.ftp_test_obj.real = True
+                        self.ftp_test_obj.virtual = True
+                    elif self.real:
+                        self.ftp_test_obj.real = True
+                        self.ftp_test_obj.virtual = False
+                    elif self.virtual:
+                        self.ftp_test_obj.real = False
+                        self.ftp_test_obj.virtual = True
+
+                    
                     self.ftp_test_obj.data = {}
                     self.ftp_test_obj.file_create()
-                    if self.real:
+                    self.ftp_test_obj.timeBreak = 5
+                    if self.real and self.virtual:
+                        self.ftp_test_obj.input_devices_list = self.user_query[0]
+                        self.ftp_test_obj.station_profile.station_names = self.station_list
+                        self.ftp_test_obj.real_client_list1 = self.user_query[1]
+                        self.ftp_test_obj.mac_id_list = self.user_query[2]
+                        # removing the iOS devices from station list
+                        self.ftp_test_obj.input_devices_list, self.ftp_test_obj.real_client_list1, self.ftp_test_obj.mac_id_list = self.filter_iOS_devices(
+                            self.ftp_test_obj.input_devices_list, self.ftp_test_obj.real_client_list1, self.ftp_test_obj.mac_id_list)
+                        self.ftp_device = self.ftp_test_obj.real_client_list1
+                        if (len(self.ftp_test_obj.input_devices_list) == 0):
+                            logger.info("No Device is available to run the test hence aborting the test")
+                            exit(0)
+                        self.ftp_test_obj.windows_ports = self.windows_ports
+                        self.ftp_test_obj.band = self.band  # since we will have only single band
+                        self.ftp_test_obj.radio = []
+                        self.ftp_test_obj.num_sta = self.num_staions
+                        self.ftp_test_obj.count = 0
+                        self.ftp_test_obj.set_values()
+                        self.ftp_test_obj.precleanup()
+                        self.cleanup.layer4_endp_clean()
+                        self.ftp_test_obj.station_list = self.station_list.copy()
+                        logger.info(f"self.realclient {self.ftp_test_obj.real_client_list1}" )
+                        logger.info(f"this is the self {self.station_list} and {self.ftp_test_obj.station_list}")
+                        self.ftp_test_obj.build()
+                    elif self.real:
                         self.ftp_test_obj.input_devices_list = self.user_query[0]
                         self.ftp_test_obj.real_client_list1 = self.user_query[1]
                         self.ftp_test_obj.mac_id_list = self.user_query[2]
@@ -1197,7 +1240,7 @@ class Mixed_Traffic(Realm):
                         self.ftp_test_obj.set_values()
                         self.ftp_test_obj.precleanup()
                         self.ftp_test_obj.build()
-                    if self.virtual:
+                    else:
                         self.ftp_test_obj.station_profile.station_names = self.station_list
                         self.ftp_test_obj.station_list = self.station_list
                         self.ftp_test_obj.band = self.band  # since we will have only single band
@@ -1210,20 +1253,25 @@ class Mixed_Traffic(Realm):
                         self.ftp_test_obj.build()
                     if not self.ftp_test_obj.passes():
                         logger.info(self.ftp_test_obj.get_fail_message())
-
-                    time1 = datetime.datetime.now()
-                    time.sleep(20)
-                    logger.info("FTP Traffic started running at {}".format(time1))
                     if self.real:
                         self.ftp_test_obj.monitor_cx()
-                    self.ftp_test_obj.start(False, False)
-                    if self.dowebgui or self.real:
-                        self.ftp_test_obj.monitor_for_runtime_csv(self.band,direction,file_size,indv_device_csv_list)
+                        logger.info(f'Test started on the devices : {self.ftp_test_obj.input_devices_list}')
+
+                    time1 = datetime.datetime.now()
+                    self.ftp_test_obj.start(False,False)
+                    # time.sleep(20)
+                    logger.info("FTP Traffic started running at {}".format(time1))
+                    if self.real and self.virtual:
+                        self.ftp_test_obj.my_monitor_for_real_devices()
+                        self.ftp_test_obj.my_monitor()
+                    elif self.dowebgui or self.real:
+                        # obj.monitor_for_runtime_csv(band,direction,file_size,indv_device_csv_list)
                         self.ftp_test_obj.my_monitor_for_real_devices()
                     else:
-                        # time.sleep(self.ftp_test_duration)
+                        # time.sleep(args.traffic_duration)
                         self.ftp_test_obj.my_monitor()
-                        self.ftp_test_obj.monitor_virtual(self.band,direction,file_size,indv_device_csv_list)
+                        # obj.monitor_virtual(band,direction,file_size,indv_device_csv_list)
+                    self.ftp_test_obj.generate_real_time_csv(self.band, direction, file_size, indv_device_csv_list)
 
 
                     self.ftp_test_obj.stop()
@@ -2044,10 +2092,12 @@ class Mixed_Traffic(Realm):
                                                f"“Client names“.")
                 self.lf_report_mt.build_objective()
                 sta_list = ""
-                if self.real:
-                    sta_list = self.ftp_test_obj.real_client_list1
-                elif self.virtual:
-                    sta_list = self.station_list
+                if self.real and self.virtual:
+                    sta_list = self.station_list.copy() + self.ftp_test_obj.real_client_list1.copy()
+                elif self.real:
+                    sta_list = self.ftp_test_obj.real_client_list1.copy()
+                else:
+                    sta_list = self.station_list.copy()
                 x_fig_size = 15
                 y_fig_size = len(sta_list) * .5 + 4
                 graph = lf_graph.lf_bar_graph_horizontal(_data_set=[self.ftp_test_obj.url_data],
@@ -2789,6 +2839,7 @@ INCLUDE_IN_README: False
                               # path=path
                               )
     # pre-cleaning & creating / selecting clients for both real and virtual
+    mixed_obj.configure = configure
     twog_selected_devices, fiveg_selected_devices, sixg_selected_devices = None, None, None
     if args.pre_cleanup:
         mixed_obj.pre_cleanup()
@@ -2828,7 +2879,7 @@ INCLUDE_IN_README: False
                     directory = str(' 2.4GHz')
                     if args.real:
                         mixed_obj.real_client_wifi_config(selected_serial_list=twog_selected_devices)
-                    elif args.virtual:
+                    if args.virtual:
                         mixed_obj.virtual_client_creation(ssid=ssid, password=password, security=security, band=band,
                                                           radio=radio, num_stations=args.twog_num_stations,
                                                           start_id=args.twog_start_id)
@@ -2840,7 +2891,7 @@ INCLUDE_IN_README: False
                     directory = str(' 5GHz')
                     if args.real:
                         mixed_obj.real_client_wifi_config(selected_serial_list=fiveg_selected_devices)
-                    elif args.virtual:
+                    if args.virtual:
                         mixed_obj.virtual_client_creation(ssid=ssid, password=password, security=security, band=band,
                                                           radio=radio, num_stations=args.fiveg_num_stations,
                                                           start_id=args.fiveg_start_id)
@@ -2852,7 +2903,7 @@ INCLUDE_IN_README: False
                     directory = str(' 6GHz')
                     if args.real:
                         mixed_obj.real_client_wifi_config(selected_serial_list=sixg_selected_devices)
-                    elif args.virtual:
+                    if args.virtual:
                         mixed_obj.virtual_client_creation(ssid=ssid, password=password, security=security, band=band,
                                                           radio=radio, num_stations=args.sixg_num_stations,
                                                           start_id=args.sixg_start_id)
@@ -3015,7 +3066,7 @@ INCLUDE_IN_README: False
                     mixed_obj.base_interop_profile.get_devices()
                     mixed_obj.select_real_devices(real_devices=mixed_obj.base_interop_profile)
 
-            elif args.virtual:
+            if args.virtual:
                 sta_list_2g, sta_list_5g, sta_list_6g = [], [], []
                 if args.twog_num_stations:
                     sta_list_2g = mixed_obj.virtual_client_creation(ssid=args.twog_ssid, password=args.twog_passwd,
@@ -3034,7 +3085,7 @@ INCLUDE_IN_README: False
                                                                     start_id=args.sixg_start_id, all_sta=True)
                 # updating num stations and station list
                 virtual_station_list = sta_list_2g + sta_list_5g + sta_list_6g
-                logger.info("Selected Virtual Station List:", virtual_station_list)
+                logger.info(f"Selected Virtual Station List: {virtual_station_list}")
                 mixed_obj.station_list = virtual_station_list
                 mixed_obj.num_staions = args.twog_num_stations + args.fiveg_num_stations + args.sixg_num_stations
             if (args.use_default_config):
